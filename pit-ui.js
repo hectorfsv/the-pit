@@ -62,6 +62,7 @@ function meatHTML(r, v) {
   else if (r.ended) line = `<div class="line dim">${esc(r.step && r.step.name || 'off the smoker')}</div>`;
   else if (r.until) line = `<div class="line">${r.until.html}</div>`;
   else if (r.step) line = `<div class="line dim">${esc(r.step.name || 'waits for you')}</div>`;
+  else line = '<div class="line dim">no target, just watched</div>';
   const rate = r.rate == null ? '' : `<div class="rate${r.stalled ? ' stall' : ''}">${r.stalled ? 'the stall, ' : ''}${r.rate >= 0 ? '+' : '−'}${Math.abs(r.rate).toFixed(Math.abs(r.rate) >= 10 ? 0 : 1)}°/h</div>`;
   const pace = r.pace ? `<div class="pace">at this pace, ${r.pace.value} around <b>${fmtClock(r.pace.at)}</b></div>` : '';
   const track = r.steps.length > 1 && r.track ? `<div class="track">${r.steps.map((s, i) => `<span class="${i < r.track.step ? 'done' : i === r.track.step ? 'cur' : ''}">${esc(s.name || 'step ' + (i + 1))}</span>`).join('')}</div>` : '<div></div>';
@@ -84,7 +85,10 @@ function pitHTML(v) {
   else if (v.phase === 'hold') line = `<div class="next">Holding at <b>${c.restSet || 150}</b>. The meat is watched for 140.</div>`;
   const pending = c.pending ? `<div class="pending">Sent ${c.pending.set}°F, waiting for the smoker to take it</div>` : c.failed ? `<div class="pending">The smoker didn't take ${c.failed.set}°F</div>` : '';
   const looked = v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
-  return `<article class="pit"><div class="head"><div class="role">Pit</div><div class="stepname">${looked}</div></div><div class="big">${temp}<div class="right">${set}${heat}</div></div>${line}${pending}</article>`;
+  const live = !c.endedAt && c.status !== 'done' && c.status !== 'stopped' && !(S.mode === 'demo' && c.status !== 'running');
+  const timers = (v.timers || []).filter(t => !t.told || v.now - t.at < 2 * HOUR).slice(-3).map(t => t.told ? `<span class="tm done">${esc(t.name)}: up at ${fmtClock(t.at)}</span>` : `<span class="tm"><b>${esc(t.name)}</b> ${fmtDur(t.left)} left, ${fmtClock(t.at)}</span>`).join('');
+  const tools = live ? `<div class="pit-tools">${timers}<button type="button" class="mini" data-act="timer">Set timer</button></div>` : timers ? `<div class="pit-tools">${timers}</div>` : '';
+  return `<article class="pit"><div class="head"><div class="role">Pit</div><div class="stepname">${looked}</div></div><div class="big">${temp}<div class="right">${set}${heat}</div></div>${line}${pending}${tools}</article>`;
 }
 function askHTML(a) {
   return `<article class="ask"><div class="when">${fmtClock(a.at)}</div><p>${esc(a.text)}</p>
@@ -111,7 +115,8 @@ function stepsHTML(v) {
     { name: 'Rest', until: 'off the smoker, down to 160', st: v.phase === 'hold' ? 'done' : v.phase === 'rest' ? 'cur' : '', when: v.doneAt },
     { name: 'Hold', until: 'at 150, as long as you can; 12 hours even better', st: v.phase === 'hold' ? 'cur' : '', when: v.holdAt },
   ].map(t => `<li class="${t.st}"><span class="b"></span><span><span class="name">${t.name}</span> <span class="until">${t.until}</span></span><span class="set"><br><span class="at">${t.when ? fmtClock(t.when) : ''}</span></span></li>`);
-  return `<section class="steps"><h3>The plan</h3><ol>${li.join('')}${tail.join('')}</ol></section>`;
+  const canPoint = cookPhase && !c.endedAt && c.status !== 'done' && !(S.mode === 'demo' && c.status !== 'running');
+  return `<section class="steps"><h3>${esc(v.plan.name)}${canPoint ? ' <button type="button" class="mini" data-act="points">Cooking points</button>' : ''}</h3><ol>${li.join('')}${tail.join('')}</ol></section>`;
 }
 function logHTML(events, now, limit, cook) {
   const list = events.filter(e => e.at <= now).slice().reverse();
@@ -143,7 +148,7 @@ function emptyHTML() {
   const heard = l ? `Last heard ${fmtDay(l.at)} at ${fmtClock(l.at)} (<span data-age="${l.at}">${fmtAgo(l.at, now)}</span>).` : 'The smoker has not been read yet.';
   return `<section class="empty-cook"><div class="hero"><h2>No cook running</h2><p>${heard}</p>${vals}</div>
     <div class="go"><button type="button" class="btn primary" data-act="start-cook">Start a cook</button><button type="button" class="btn" data-act="read-now">Read now</button></div>
-    <p class="note dim">Start a cook and the engine looks at the smoker every two minutes, moves your plan along and tells you in your Jarvis chat. Your phone can sleep.</p></section>`;
+    <p class="note dim">Set the pit, name the meat on each probe with the temperature to tell you at, add cooking points if you want the smoker to change on its own. The engine looks every two minutes and tells you in your Jarvis chat; your phone can sleep. A plan from the Plans tab can join at any time.</p></section>`;
 }
 
 // ---- Plans --------------------------------------------------------------------------------------------------
@@ -166,7 +171,8 @@ function planViewHTML(id) {
   return `<section class="plan-view"><a class="back" href="#plans">← Plans</a><h2>${esc(p.name)}</h2>${p.for ? `<div class="dim">for ${esc(p.for)}</div>` : ''}${p.notes ? `<p class="notes">${esc(p.notes)}</p>` : ''}
     <div class="dim" style="font-size:13px">Pit up to ${p.max_pit}°F. Probes: ${(p.probes || []).map(esc).join(', ') || 'none'}.</div>
     ${tracks.map(([role, steps]) => trackHTML(role, steps, p.probes)).join('')}
-    <div class="row"><button type="button" class="btn primary" data-act="start-plan" data-v="${esc(r.id)}">Start this plan</button><button type="button" class="btn" data-act="edit-plan" data-v="${esc(r.id)}">Edit</button><button type="button" class="btn" data-act="dup-plan" data-v="${esc(r.id)}">Duplicate</button><button type="button" class="btn danger" data-act="archive-plan" data-v="${esc(r.id)}">Archive</button></div></section>`;
+    <div class="row">${S.cook && !S.cook.endedAt && S.cook.phase === 'cook' && !(S.mode === 'demo' && S.cook.status !== 'running') ? `<button type="button" class="btn primary" data-act="use-plan" data-v="${esc(r.id)}">Use on the running cook</button><button type="button" class="btn" data-act="start-plan" data-v="${esc(r.id)}">Start a new cook with it</button>` : `<button type="button" class="btn primary" data-act="start-plan" data-v="${esc(r.id)}">Start a cook with this plan</button>`}</div>
+    <div class="row"><button type="button" class="btn" data-act="edit-plan" data-v="${esc(r.id)}">Edit</button><button type="button" class="btn" data-act="dup-plan" data-v="${esc(r.id)}">Duplicate</button><button type="button" class="btn danger" data-act="archive-plan" data-v="${esc(r.id)}">Archive</button></div></section>`;
 }
 
 // ---- History ------------------------------------------------------------------------------------------------

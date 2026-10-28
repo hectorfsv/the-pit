@@ -115,7 +115,7 @@ function normCook(row) {
     endedAt: row.ended_at ? tms(row.ended_at) : st.endedAt ? tms(st.endedAt) : null, heartbeatAt: row.heartbeat_at ? tms(row.heartbeat_at) : null,
     meat: row.meat || st.meat || null, weightLb: row.weight_lb || st.weightLb || null, notes: row.notes || '', rating: row.rating || null,
     runnerUrl: row.runner_url || null, planId: row.plan_id || null, resting: st.resting || [], rested: st.rested || {}, restSet: st.restSet || null,
-    lastSet: st.lastSet, pending: st.pending || null, failed: st.failed || null, alarms: st.alarms || {}, demo: false,
+    lastSet: st.lastSet, pending: st.pending || null, failed: st.failed || null, alarms: st.alarms || {}, timers: st.timers || [], demo: false,
   });
 }
 
@@ -253,8 +253,9 @@ function buildView(cook, readings, events, now) {
     power: last ? last.power : null, rssi: last ? last.rssi : null, errors: last ? last.errors : [], fah: last ? last.fah : null };
   const phase = cook.status === 'paused' ? 'paused' : cook.phase;
   const doneEv = events.find(e => e.phase === 'rest' && /^Cook done/.test(e.text)), holdEv = events.find(e => e.phase === 'hold');
+  const timers = (cook.timers || []).map(t => ({ name: t.name, minutes: t.minutes, at: tms(t.at), told: !!t.told, left: Math.max(0, (tms(t.at) - now) / MINUTE) }));
   return { cook, plan, roles, pit, asks: openAsks(events, now), marks: marksOf(events, cook), sensors, phase, last, now, elapsed: now - cook.startedAt,
-    doneAt: doneEv ? doneEv.at : null, holdAt: holdEv ? holdEv.at : null, events };
+    doneAt: doneEv ? doneEv.at : null, holdAt: holdEv ? holdEv.at : null, events, timers };
 }
 // The readings behind a view: the live cook's (up to now) on the Now tab, a past cook's whole set elsewhere.
 function readingsOf(v) {
@@ -274,4 +275,40 @@ function csvOf(readings, roles) {
   const pids = roles.map(r => r.pid), head = ['time', 'pit', 'setpoint', 'heating', 'power', 'door_open', 'lid_open'].concat(roles.map(r => `${r.role} (${r.pid})`), ['rssi', 'errors']);
   const rows = readings.map(r => [new Date(r.at).toISOString(), r.pit, r.set, r.heating ? 1 : 0, r.power ? 1 : 0, r.door ? 1 : 0, r.lid ? 1 : 0].concat(pids.map(p => r.probes[p] == null ? '' : r.probes[p]), [r.rssi == null ? '' : r.rssi, (r.errors || []).join(' ')]));
   return [head].concat(rows).map(r => r.join(',')).join('\n');
+}
+
+// ---- the probes a pit can read, and the plan the basic start writes -------------------------------------------
+// The smoker's four ports today (p0–p3, shown as Probe 1–4). A wireless thermometer later: its driver lists its ids in
+// pits.probes and writes them into readings.probes; anything seen in a reading shows up here too.
+function probeSources() {
+  const list = S.pit && Array.isArray(S.pit.probes) && S.pit.probes.length ? S.pit.probes.map(p => ({ id: p.id, label: p.label || p.id })) : [0, 1, 2, 3].map(i => ({ id: 'p' + i, label: 'Probe ' + (i + 1) }));
+  const seen = S.cook ? (S.readings[S.readings.length - 1] || {}).probes : (S.last || {}).probes;
+  for (const id of Object.keys(seen || {})) if (!list.some(p => p.id === id)) list.push({ id, label: id.toUpperCase() });
+  return list;
+}
+const slugRole = name => String(name || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^[_0-9]+|_+$/g, '');
+// meats: [{ probe, name, target }] (a name makes it a meat; a target makes the engine tell him);
+// setTemp: the pit's setpoint at start, or null to leave the smoker alone; points: [{ at, set }] on the meat `follow`.
+function composePlan(o) {
+  const errors = [], roles = [], probes = {}, tracks = {};
+  for (const m of o.meats || []) {
+    const role = slugRole(m.name); if (!role) continue;
+    if (roles.includes(role)) { errors.push(`Two meats are called "${role}".`); continue; }
+    roles.push(role); probes[role] = m.probe;
+    if (m.target) tracks[role] = [{ name: 'Watching', until: { at_least: +m.target } }, { name: 'There', tell: `The ${role} reached ${+m.target}°F ({${role}}°F now).` }];
+  }
+  const points = (o.points || []).filter(p => p.at && p.set).map(p => ({ at: +p.at, set: +p.set })).sort((a, b) => a.at - b.at);
+  const follow = points.length ? slugRole(o.follow) : null;
+  if (points.length && !roles.includes(follow)) errors.push('Cooking points need a meat to follow: name the meat on its probe.');
+  const setTemp = o.setTemp ? +o.setTemp : null;
+  let pit;
+  if (points.length) {
+    pit = [{ name: 'Start', set: setTemp || undefined, until: { probe: follow, at_least: points[0].at } }];
+    points.forEach((p, i) => pit.push(Object.assign({ name: `at ${p.at}`, set: p.set }, points[i + 1] ? { until: { probe: follow, at_least: points[i + 1].at } } : {}, { tell: `The ${follow} hit ${p.at}°F: pit to ${p.set}.` })));
+    if (!setTemp) delete pit[0].set;
+  } else pit = [setTemp ? { name: 'Start', set: setTemp, tell: `Pit at ${setTemp}.` } : { name: 'Watching', tell: 'Watching the pit. Only you change the smoker.' }];
+  const max = Math.min(700, Math.max(325, setTemp || 0, ...points.map(p => p.set)));
+  const plan = { name: points.length ? 'Cooking points' : setTemp ? `Pit at ${setTemp}` : 'Just watch', for: 'today', max_pit: max, probes: roles, tracks: Object.assign({ pit }, tracks) };
+  if (ENGINE) errors.push(...ENGINE.validatePlan(plan, { min: S.pit ? S.pit.range_min : 150, max: S.pit ? S.pit.range_max : 700 }));
+  return { plan, probes, errors: Array.from(new Set(errors)) };
 }

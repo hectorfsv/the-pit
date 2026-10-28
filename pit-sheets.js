@@ -124,35 +124,93 @@ function openPower() {
   confirmSheet({ title: on ? 'Turn the smoker off' : 'Turn the smoker on', sub: on ? 'Same as the power button on the smoker. A running cook is told the smoker is off and asks what to do.' : 'The smoker powers on. You still light it.', label: on ? 'Power off' : 'Power on', cls: on ? 'danger' : 'primary', onFire: () => placeOrder('power', !on) });
 }
 function openReadNow() { placeOrder('read'); }
-function openNewCook(planId) {
-  const plans = S.plans.filter(p => !p.archived); if (!plans.length) { toast('No plans yet.', 'bad'); return; }
-  const last = S.last || (S.view && S.view.last), pids = ['p0', 'p1', 'p2', 'p3'];
-  const probeLabel = p => `Probe ${p.slice(1)}${last && last.probes && last.probes[p] != null ? `, ${rnd(last.probes[p])}°` : ', not reading'}`;
-  let sel = plans.find(p => p.id === planId) || plans[0], tells = [];
+// ---- the basic start (his ask 10-28): the smoker big, set temp, a timer, each probe's meat and its own temperature,
+//      and the cooking points: "when the meat hits X, smoker to Y". No plan to pick; plans have their own tab. ----------
+const TIMER_PRESETS = [0, 30, 45, 60, 90, 120], TEMP_PRESETS = [0, 200, 225, 250, 275, 300, 325];
+function smokerNowHTML(last) {
+  if (!last) return '<div class="nowbox"><div class="k">The smoker now</div><div class="dim">no reading yet</div></div>';
+  const probes = probeSources().map(p => `<span>${esc(p.label)} <b>${last.probes && last.probes[p.id] != null ? rnd(last.probes[p.id]) + '°' : '—'}</b></span>`).join('');
+  return `<div class="nowbox"><div class="k">The smoker now, looked <span data-age="${last.at}">${fmtAgo(last.at, S.now())}</span></div><div class="big">${last.pit == null ? '—' : rnd(last.pit) + '°'}<span>${last.set ? `set ${last.set}` : 'no setpoint'}${last.heating ? ', heating' : ''}</span></div><div class="pnow">${probes}</div></div>`;
+}
+function presetsHTML(name, values, current, unit, zero) {
+  return `<div class="presets" data-presets="${name}">${values.map(v => `<button type="button" data-v="${v}" class="${(current || 0) === v ? 'on' : ''}">${v === 0 ? zero : v + unit}</button>`).join('')}</div>`;
+}
+function openNewCook() {
+  const last = S.last || (S.view && S.view.last) || null;
+  const st = { setTemp: last && last.set >= 150 ? last.set : 225, timer: 0, meats: probeSources().map(p => ({ probe: p.id, label: p.label, name: '', target: '' })), points: [], follow: '' };
+  const named = () => st.meats.filter(m => slugRole(m.name));
   const body = () => {
-    const roles = sel.plan.probes || [];
-    return `<div class="radio-list">${plans.map(p => `<label class="${p.id === sel.id ? 'on' : ''}"><input type="radio" name="plan" value="${esc(p.id)}"${p.id === sel.id ? ' checked' : ''}><span><span class="t">${esc(p.plan.name)}</span><div class="d">${planSummary(p.plan)}</div></span></label>`).join('')}</div>
-      ${roles.length ? `<div class="assign"><div class="note">Which probe is in which meat?</div>${roles.map((r, i) => `<div class="a"><div class="r" style="--c:${MEAT_COLORS[i % 4]}"><i></i>${esc(r)}</div><label class="field"><select data-role="${esc(r)}"><option value="">no probe</option>${pids.map(p => `<option value="${p}"${i === 0 && p === 'p0' ? ' selected' : ''}>${probeLabel(p)}</option>`).join('')}</select></label></div>`).join('')}</div>` : ''}
-      <div class="tells"><div class="note">Also tell me when a probe gets to a temperature (any plan; the whole point of Just watch).</div><div id="tell-rows">${tells.map((t, i) => `<div class="t"><label class="field"><input data-i="${i}" data-k="name" placeholder="sausage" value="${esc(t.name)}"></label><label class="field"><select data-i="${i}" data-k="probe">${pids.map(p => `<option value="${p}"${t.probe === p ? ' selected' : ''}>${p.toUpperCase()}</option>`).join('')}</select></label><label class="field"><input data-i="${i}" data-k="at" type="number" inputmode="numeric" placeholder="°F" value="${t.at || ''}"></label><button type="button" data-del="${i}" aria-label="Remove">×</button></div>`).join('')}</div><button type="button" class="add" id="add-tell">Add a line</button></div>
-      <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><label class="field"><span>Meat (optional)</span><input id="nc-meat" placeholder="brisket, 14 lb packer"></label><label class="field"><span>Weight, lb (optional)</span><input id="nc-weight" type="number" inputmode="decimal" step="0.1"></label></div>
-      ${refusals(last).length ? `<p class="refuse">${esc(refusals(last).join(' '))}</p>` : '<p class="okay">The smoker is on, in °F and online.</p>'}`;
+    const plan = composePlan(st), bad = refusals(last).concat(plan.errors);
+    return `${smokerNowHTML(last)}
+      <section class="bs"><h4>Set the pit</h4>${presetsHTML('temp', TEMP_PRESETS, st.setTemp, '', 'leave it')}<div class="stepper small"><button type="button" data-d="-5" aria-label="5 less">−</button><div class="val">${st.setTemp ? `${st.setTemp}<sup>°F</sup>` : '<span class="leave">as it is</span>'}</div><button type="button" data-d="5" aria-label="5 more">+</button></div></section>
+      <section class="bs"><h4>Timer</h4><div class="note">Counts on the screen; your Jarvis chat gets told when it's up.</div>${presetsHTML('timer', TIMER_PRESETS, st.timer, ' min', 'none')}<label class="field"><span>Or minutes</span><input id="timer-min" type="number" inputmode="numeric" min="1" value="${st.timer && !TIMER_PRESETS.includes(st.timer) ? st.timer : ''}" placeholder="75"></label></section>
+      <section class="bs"><h4>The meats</h4><div class="note">Name the meat on each probe and the temperature to tell you at. Each one tells you on its own.</div>
+        <div class="mrows">${st.meats.map((m, i) => `<div class="mrow"><span class="pl">${esc(m.label)}<b>${last && last.probes && last.probes[m.probe] != null ? rnd(last.probes[m.probe]) + '°' : '—'}</b></span><label class="field"><input data-m="${i}" data-k="name" placeholder="${['chicken', 'pork', 'beef', 'links'][i % 4]}" value="${esc(m.name)}" autocapitalize="none"></label><label class="field"><input data-m="${i}" data-k="target" type="number" inputmode="numeric" placeholder="°F" value="${m.target}"></label></div>`).join('')}</div></section>
+      <section class="bs"><h4>Cooking points</h4><div class="note">When a meat reaches a temperature, the smoker goes to another. The app makes the changes.</div>
+        ${named().length ? `<label class="field"><span>Follow</span><select id="follow">${named().map(m => `<option value="${esc(m.name)}"${slugRole(m.name) === slugRole(st.follow) ? ' selected' : ''}>${esc(m.name)} (${esc(m.label)})</option>`).join('')}</select></label>` : '<div class="dim" style="font-size:13px">Name a meat above first.</div>'}
+        <div class="prows">${st.points.map((pt, i) => `<div class="prow"><span>when it hits</span><label class="field"><input data-p="${i}" data-k="at" type="number" inputmode="numeric" placeholder="165" value="${pt.at}"></label><span>smoker to</span><label class="field"><input data-p="${i}" data-k="set" type="number" inputmode="numeric" placeholder="250" value="${pt.set}"></label><button type="button" data-delp="${i}" aria-label="Remove">×</button></div>`).join('')}</div>
+        <button type="button" class="add" id="add-point">Add a point</button></section>
+      <div id="start-check">${bad.length ? `<p class="refuse">${esc(bad.join(' '))}</p>` : `<p class="okay">Ready: ${esc(plan.plan.name)}${named().length ? ', ' + named().map(m => m.name + (m.target ? ' to ' + m.target : '')).join(', ') : ''}${st.timer ? `, a ${st.timer}-minute timer` : ''}.</p>`}</div>`;
   };
+  const check = sh => { const plan = composePlan(st), bad = refusals(last).concat(plan.errors); $('#start-check', sh).innerHTML = bad.length ? `<p class="refuse">${esc(bad.join(' '))}</p>` : `<p class="okay">Ready: ${esc(plan.plan.name)}.</p>`; $('#sheet-go', sh).disabled = bad.length > 0; };
   const wire = sh => {
-    $$('input[name=plan]', sh).forEach(r => r.addEventListener('change', () => { sel = plans.find(p => p.id === r.value); redraw(sh); }));
-    $$('#tell-rows [data-k]', sh).forEach(el => el.addEventListener('input', () => { tells[+el.dataset.i][el.dataset.k] = el.dataset.k === 'at' ? +el.value : el.value; }));
-    $$('#tell-rows [data-del]', sh).forEach(b => b.addEventListener('click', () => { tells.splice(+b.dataset.del, 1); redraw(sh); }));
-    $('#add-tell', sh).addEventListener('click', () => { tells.push({ name: '', probe: 'p1', at: '' }); redraw(sh); });
+    $$('[data-presets=temp] button', sh).forEach(b => b.addEventListener('click', () => { st.setTemp = +b.dataset.v; redraw(sh); }));
+    $$('.stepper button', sh).forEach(b => b.addEventListener('click', () => { st.setTemp = Math.min(700, Math.max(150, (st.setTemp || 220) + +b.dataset.d)); redraw(sh); }));
+    $$('[data-presets=timer] button', sh).forEach(b => b.addEventListener('click', () => { st.timer = +b.dataset.v; redraw(sh); }));
+    $('#timer-min', sh).addEventListener('input', e => { st.timer = +e.target.value || 0; $$('[data-presets=timer] button', sh).forEach(x => x.classList.toggle('on', +x.dataset.v === st.timer)); check(sh); });
+    $$('[data-m]', sh).forEach(el => el.addEventListener('input', () => { st.meats[+el.dataset.m][el.dataset.k] = el.value; if (el.dataset.k === 'name') { if (!st.follow || !named().some(m => slugRole(m.name) === slugRole(st.follow))) st.follow = named()[0] ? named()[0].name : ''; const f = $('#follow', sh); if (!f || named().length !== f.options.length) { const keep = document.activeElement === el ? [el.dataset.m, el.selectionStart] : null; redraw(sh); if (keep) { const again = $(`[data-m="${keep[0]}"][data-k=name]`, sh); if (again) { again.focus(); try { again.setSelectionRange(keep[1], keep[1]); } catch (e) { /* number fields */ } } } return; } } check(sh); }));
+    const f = $('#follow', sh); if (f) f.addEventListener('change', () => { st.follow = f.value; check(sh); });
+    $$('[data-p]', sh).forEach(el => el.addEventListener('input', () => { st.points[+el.dataset.p][el.dataset.k] = el.value; check(sh); }));
+    $$('[data-delp]', sh).forEach(b => b.addEventListener('click', () => { st.points.splice(+b.dataset.delp, 1); redraw(sh); }));
+    $('#add-point', sh).addEventListener('click', () => { if (!st.follow && named()[0]) st.follow = named()[0].name; st.points.push({ at: '', set: '' }); redraw(sh); setTimeout(() => { const last = $$('[data-p][data-k=at]', sh).pop(); if (last) last.focus(); }, 50); });
+    check(sh);
   };
-  const redraw = sh => { const meat = $('#nc-meat', sh).value, w = $('#nc-weight', sh).value; $('.body', sh).innerHTML = body(); $('#nc-meat', sh).value = meat; $('#nc-weight', sh).value = w; wire(sh); };
-  confirmSheet({ title: 'Start a cook', sub: 'The plan freezes as it is now; editing the recipe later never changes a running cook.', body: body(), label: 'Start the cook', disabled: refusals(last).length > 0, full: true,
+  const redraw = sh => { const y = sh.scrollTop; $('.body', sh).innerHTML = body(); wire(sh); sh.scrollTop = y; };
+  confirmSheet({ title: 'Start a cook', sub: 'The basics. A plan is for "set the meat and go": pick one on the Plans tab, now or while this cook runs.', body: body(), label: 'Start the cook', full: true, disabled: true,
     onOpen: wire,
-    onFire: () => {
-      const sh = $('#sheet-root .sheet') || document; const probes = {};
-      $$('select[data-role]').forEach(s => { if (s.value) probes[s.dataset.role] = s.value; });
-      const value = { plan_id: sel.id, probes, meat: $('#nc-meat') ? $('#nc-meat').value.trim() || undefined : undefined, weight_lb: $('#nc-weight') && $('#nc-weight').value ? +$('#nc-weight').value : undefined, tells: tells.filter(t => t.name && t.at).map(t => ({ name: t.name, probe: t.probe, at: +t.at })) };
-      if (!value.tells.length) delete value.tells;
-      placeOrder('start', value, { cookId: null });
-    } });
+    onFire: () => { const plan = composePlan(st); if (plan.errors.length) return; const value = { plan: plan.plan, probes: plan.probes }; if (st.timer) value.tells = [{ name: 'timer', minutes: st.timer }]; placeOrder('start', value, { cookId: null }); } });
+}
+// A plan from the Plans tab: which probe is in which of its meats, then Start, or use it on the running cook.
+function assignHTML(row, current) {
+  const src = probeSources(), last = S.last || (S.view && S.view.last) || null;
+  return `<div class="assign">${(row.plan.probes || []).map((r, i) => `<div class="a"><div class="r" style="--c:${MEAT_COLORS[i % 4]}"><i></i>${esc(r)}</div><label class="field"><select data-role="${esc(r)}"><option value="">no probe</option>${src.map((p, j) => `<option value="${esc(p.id)}"${(current && current[r] === p.id) || (!(current && current[r]) && j === i) ? ' selected' : ''}>${esc(p.label)}${last && last.probes && last.probes[p.id] != null ? `, ${rnd(last.probes[p.id])}°` : ''}</option>`).join('')}</select></label></div>`).join('')}</div>`;
+}
+const readAssign = sh => { const probes = {}; $$('select[data-role]', sh).forEach(x => { if (x.value) probes[x.dataset.role] = x.value; }); return probes; };
+function openStartPlan(row) {
+  if (!row) return;
+  const last = S.last || (S.view && S.view.last) || null; let timer = 0;
+  confirmSheet({ title: `Start: ${row.plan.name}`, sub: planSummary(row.plan), label: 'Start the cook', full: true, disabled: refusals(last).length > 0,
+    body: `${smokerNowHTML(last)}${(row.plan.probes || []).length ? `<div class="note">Which probe is in which meat?</div>${assignHTML(row)}` : ''}<section class="bs"><h4>Timer</h4>${presetsHTML('timer', TIMER_PRESETS, 0, ' min', 'none')}</section>${refusals(last).length ? `<p class="refuse">${esc(refusals(last).join(' '))}</p>` : '<p class="okay">The smoker is on, in °F and online. The plan freezes as it is now.</p>'}`,
+    onOpen: sh => $$('[data-presets=timer] button', sh).forEach(b => b.addEventListener('click', () => { timer = +b.dataset.v; $$('[data-presets=timer] button', sh).forEach(x => x.classList.toggle('on', x === b)); })),
+    onFire: () => { const value = { plan_id: row.id, plan: row.plan, probes: readAssign(document) }; if (timer) value.tells = [{ name: 'timer', minutes: timer }]; placeOrder('start', value, { cookId: null }); } });
+}
+function openUsePlan(row) {
+  const v = S.view; if (!row || !v) return;
+  confirmSheet({ title: `Use on the running cook: ${row.plan.name}`, sub: 'Its pit steps take over from the first one now. The meats this cook already has keep their own lines.', label: 'Use this plan now',
+    body: `${(row.plan.probes || []).length ? `<div class="note">Which probe is in which of its meats?</div>${assignHTML(row, v.cook.probes)}` : ''}<div class="note">${esc(planSummary(row.plan).replace(/<[^>]+>/g, ''))}</div>`,
+    onFire: () => placeOrder('plan', { plan_id: row.id, plan: row.plan, probes: readAssign(document) }) });
+}
+function openPoints() {
+  const v = S.view; if (!v || v.phase !== 'cook' && v.phase !== 'paused') return;
+  const roles = v.roles.map(r => r.role); if (!roles.length) { toast('Name a meat on a probe first (Start a cook does that).', 'bad'); return; }
+  const cur = v.plan.name === 'Cooking points' ? v.plan : null;
+  const st = { follow: cur ? (cur.tracks.pit[0].until || {}).probe || roles[0] : roles[0], setTemp: v.pit.set || null, points: cur ? cur.tracks.pit.slice(1).map((s, i) => ({ at: cur.tracks.pit[i].until.at_least, set: s.set })) : [] };
+  const compose = () => composePlan({ setTemp: st.setTemp, meats: [{ probe: v.cook.probes[st.follow], name: st.follow }], points: st.points, follow: st.follow });
+  const body = () => `<label class="field"><span>Follow</span><select id="follow">${roles.map(r => `<option value="${esc(r)}"${r === st.follow ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>
+    <div class="prows">${st.points.map((pt, i) => `<div class="prow"><span>when it hits</span><label class="field"><input data-p="${i}" data-k="at" type="number" inputmode="numeric" placeholder="165" value="${pt.at}"></label><span>smoker to</span><label class="field"><input data-p="${i}" data-k="set" type="number" inputmode="numeric" placeholder="250" value="${pt.set}"></label><button type="button" data-delp="${i}" aria-label="Remove">×</button></div>`).join('')}</div>
+    <button type="button" class="add" id="add-point">Add a point</button><div id="start-check"></div>`;
+  const check = sh => { const c = compose(); $('#start-check', sh).innerHTML = c.errors.length ? `<p class="refuse">${esc(c.errors.join(' '))}</p>` : st.points.length ? '<p class="okay">The points take over from the current setpoint; the meats keep their own lines.</p>' : '<p class="note">No points: the pit stays as it is.</p>'; $('#sheet-go', sh).disabled = c.errors.length > 0 || !st.points.filter(p => p.at && p.set).length; };
+  const wire = sh => { $('#follow', sh).addEventListener('change', e => { st.follow = e.target.value; check(sh); }); $$('[data-p]', sh).forEach(el => el.addEventListener('input', () => { st.points[+el.dataset.p][el.dataset.k] = el.value; check(sh); })); $$('[data-delp]', sh).forEach(b => b.addEventListener('click', () => { st.points.splice(+b.dataset.delp, 1); redraw(sh); })); $('#add-point', sh).addEventListener('click', () => { st.points.push({ at: '', set: '' }); redraw(sh); }); check(sh); };
+  const redraw = sh => { $('.body', sh).innerHTML = body(); wire(sh); };
+  confirmSheet({ title: 'Cooking points', sub: 'When the meat you follow reaches a temperature, the smoker goes to another.', body: body(), label: 'Use these points', onOpen: wire,
+    onFire: () => { const c = compose(); if (c.errors.length) return; placeOrder('plan', { plan: c.plan, probes: c.probes }); } });
+}
+function openTimer() {
+  let minutes = 60, name = 'timer';
+  openSheet({ title: 'Set a timer', sub: 'It counts on the screen, and your Jarvis chat gets told when it is up.',
+    body: `${presetsHTML('timer', TIMER_PRESETS.filter(Boolean).concat([180]), 60, ' min', '')}<div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><label class="field"><span>Minutes</span><input id="timer-min" type="number" inputmode="numeric" min="1" value="60"></label><label class="field"><span>Name</span><input id="timer-name" value="timer" placeholder="flip, spritz, wrap"></label></div>`,
+    foot: '<button type="button" class="btn primary" id="sheet-go">Start the timer</button><button type="button" class="btn quiet" id="sheet-no">Not now</button>',
+    onOpen: sh => { $$('[data-presets=timer] button', sh).forEach(b => b.addEventListener('click', () => { minutes = +b.dataset.v; $('#timer-min', sh).value = minutes; $$('[data-presets=timer] button', sh).forEach(x => x.classList.toggle('on', x === b)); })); $('#timer-min', sh).addEventListener('input', e => { minutes = +e.target.value || 0; }); $('#timer-name', sh).addEventListener('input', e => { name = e.target.value; }); $('#sheet-no', sh).addEventListener('click', closeSheet); $('#sheet-go', sh).addEventListener('click', () => { if (!(minutes > 0)) { toast('Minutes must be more than 0.', 'bad'); return; } closeSheet(); placeOrder('timer', { name: name.trim() || 'timer', minutes }); }); } });
 }
 function openAnswer(text) { placeOrder('answer', text); }
 function openAllEvents() { const v = S.view; if (!v) return; openSheet({ title: 'Every event', full: true, body: logHTML(v.events, v.now, 0, v.cook), foot: '<button type="button" class="btn quiet" id="sheet-no">Close</button>', onOpen: sh => $('#sheet-no', sh).addEventListener('click', closeSheet) }); }
@@ -274,7 +332,10 @@ function onMainClick(e) {
   else if (act === 'edit-plan') openEditor(S.plans.find(p => p.id === v));
   else if (act === 'dup-plan') { const r = S.plans.find(p => p.id === v); if (r) { const copyRow = { plan: JSON.parse(JSON.stringify(r.plan)) }; copyRow.plan.name = r.plan.name + ' (copy)'; openEditor(copyRow); } }
   else if (act === 'archive-plan') archivePlan(v);
-  else if (act === 'start-plan') openNewCook(v);
+  else if (act === 'start-plan') openStartPlan(S.plans.find(p => p.id === v));
+  else if (act === 'use-plan') openUsePlan(S.plans.find(p => p.id === v));
+  else if (act === 'points') openPoints();
+  else if (act === 'timer') openTimer();
   else if (act === 'open-cook') go('history', v);
   else if (act === 'rate') { const c = S.history.find(h => h.id === S.sub); if (!c) return; c.rating = +v; if (S.mode === 'demo') store.set(`pit.demo.rating.${c.id.replace('demo-', '')}`, +v); else placeOrder('rate', { cook_id: c.id, rating: +v }, { cookId: c.id }); renderAll(); }
   else if (act === 'save-note') { const c = S.history.find(h => h.id === S.sub); if (!c) return; c.notes = $('#note-text').value; if (S.mode === 'demo') { store.set(`pit.demo.notes.${c.id.replace('demo-', '')}`, c.notes); toast('Note kept on this device (sample mode).', 'good'); } else placeOrder('note', { cook_id: c.id, text: c.notes }, { cookId: c.id }); }

@@ -237,39 +237,41 @@ function met(u, role, st, ctx) {
 
 // Start a cook. probes maps the plan's probe names to the smoker's probes ({ meat: 'p0' }); a meat track with no
 // probe is skipped (Fiesta with chicken only). The smoker must be on, in °F and heard from in the last 5 minutes.
-function startCook({ plan, probes, reading, now, id, meat, weightLb, alerts, tells }) {
-  probes = probes || {};
-  // "Tell me at X" (the page's extra lines on any plan, Just watch above all): each tell becomes a meat track of its
-  // own, in the plan's own format, so nothing new is needed to watch it. [{ name, probe, at }] or [{ name, probe, down_to }].
-  const tellErrors = [];
-  if (Array.isArray(tells) && tells.length && plan && typeof plan === 'object') {
-    plan = copy(plan); probes = Object.assign({}, probes);
-    plan.probes = Array.isArray(plan.probes) ? plan.probes.slice() : [];
-    plan.tracks = Object.assign({}, plan.tracks);
-    for (const t of tells) {
-      const role = String((t && t.name) || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^[_0-9]+|_+$/g, '');
-      if (!role) { tellErrors.push('A tell needs a name.'); continue; }
-      if (plan.probes.includes(role) || plan.tracks[role]) { tellErrors.push(`"${role}" is already in this plan.`); continue; }
-      const down = t.down_to !== undefined, line = down ? t.down_to : t.at;
-      plan.probes.push(role);
-      plan.tracks[role] = [
-        { name: 'Watching', until: down ? { at_most: line } : { at_least: line } },
-        { name: 'There', tell: `The ${role} ${down ? 'came down to' : 'reached'} ${line}°F ({${role}}°F now).` },
-      ];
-      probes[role] = t.probe;
-    }
+// Without a plan a cook just watches: the graph, the meats, the alerts; only he changes the smoker.
+const WATCH_PLAN = { name: 'Just watch', for: 'any cook you run yourself', max_pit: 325, probes: [], tracks: { pit: [{ name: 'Watching', tell: 'Watching the pit. Only you change the smoker.' }] } };
+const PROBE_ID = /^[a-z][a-z0-9_]*$/;   // the smoker's p0–p3 today; a wireless thermometer's own ids tomorrow
+
+// "Tell me" lines on any plan: a probe line ({ name, probe, at } or { name, probe, down_to }) becomes a meat track of
+// its own, in the plan's own format, so nothing new is needed to watch it; a timer ({ name, minutes }) is kept on the
+// cook and told once when it's up (the smoker's own timer can't be set from outside).
+function withTells(plan, probes, tells) {
+  const errors = [], timers = [];
+  probes = Object.assign({}, probes || {});
+  if (!(Array.isArray(tells) && tells.length && plan && typeof plan === 'object')) return { plan, probes, timers, errors };
+  plan = copy(plan); plan.probes = Array.isArray(plan.probes) ? plan.probes.slice() : []; plan.tracks = Object.assign({}, plan.tracks);
+  for (const t of tells) {
+    const role = String((t && t.name) || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^[_0-9]+|_+$/g, '');
+    if (!role) { errors.push('A tell needs a name.'); continue; }
+    if (t.minutes !== undefined) { if (!(t.minutes > 0)) errors.push(`Timer "${role}": minutes must be more than 0.`); else timers.push({ name: role, minutes: t.minutes }); continue; }
+    if (plan.probes.includes(role) || plan.tracks[role]) { errors.push(`"${role}" is already in this plan.`); continue; }
+    const down = t.down_to !== undefined, line = down ? t.down_to : t.at;
+    plan.probes.push(role);
+    plan.tracks[role] = [
+      { name: 'Watching', until: down ? { at_most: line } : { at_least: line } },
+      { name: 'There', tell: `The ${role} ${down ? 'came down to' : 'reached'} ${line}°F ({${role}}°F now).` },
+    ];
+    probes[role] = t.probe;
   }
-  const errors = validatePlan(plan, reading && reading.range).concat(tellErrors);
-  if (!reading) errors.push("I can't read the smoker right now.");
-  else {
-    if (mins(reading.at, now) > RULES.staleMinutes) errors.push('The smoker is offline.');
-    if (!reading.power) errors.push('The smoker is off. Turn it on and light it first.');
-    if (!reading.fah) errors.push('The smoker is set to °C. Switch it to °F first.');
-  }
-  const roles = (plan && Array.isArray(plan.probes)) ? plan.probes : [];
+  return { plan, probes, timers, errors };
+}
+const timerRows = (timers, now) => timers.map(t => ({ name: t.name, minutes: t.minutes, at: ms(now) + t.minutes * 60000, told: false }));
+
+// The probes he assigned against the plan: real ids, one probe per meat, every probe the pit waits on named.
+function probeErrors(plan, probes) {
+  const errors = [], roles = (plan && Array.isArray(plan.probes)) ? plan.probes : [];
   for (const [role, pid] of Object.entries(probes)) {
     if (!roles.includes(role)) errors.push(`This plan has no "${role}" probe.`);
-    if (!/^p[0-9]$/.test(pid)) errors.push(`"${pid}" isn't one of the smoker's probes (p0, p1, …).`);
+    if (!PROBE_ID.test(String(pid))) errors.push(`"${pid}" isn't a probe id (p0, p1, …).`);
   }
   const pids = Object.values(probes);
   if (new Set(pids).size !== pids.length) errors.push('One probe per meat.');
@@ -277,13 +279,26 @@ function startCook({ plan, probes, reading, now, id, meat, weightLb, alerts, tel
     const need = s.until && !('minutes' in s.until) ? probeOf(s.until, 'pit') : null;
     if (need && !probes[need]) errors.push(`This plan waits on the ${need} probe: say which probe is in the ${need}.`);
   }
+  return errors;
+}
+
+function startCook({ plan, probes, reading, now, id, meat, weightLb, alerts, tells }) {
+  const w = withTells(plan || WATCH_PLAN, probes, tells); plan = w.plan; probes = w.probes;
+  const errors = validatePlan(plan, reading && reading.range).concat(w.errors);
+  if (!reading) errors.push("I can't read the smoker right now.");
+  else {
+    if (mins(reading.at, now) > RULES.staleMinutes) errors.push('The smoker is offline.');
+    if (!reading.power) errors.push('The smoker is off. Turn it on and light it first.');
+    if (!reading.fah) errors.push('The smoker is set to °C. Switch it to °F first.');
+  }
+  errors.push(...probeErrors(plan, probes));
   if (errors.length) return { ok: false, errors: Array.from(new Set(errors)) };
 
   const cook = {
     id: id || null, plan: copy(plan), probes: copy(probes), meat: meat || null, weightLb: weightLb || null,
     status: 'running', pausedFor: null, phase: 'cook', phaseAt: now, startedAt: now, endedAt: null, heartbeatAt: now,
     tracks: {}, lastSet: reading.set, setAt: now, pending: null, failed: null, alarms: {}, glitches: {}, readFails: 0,
-    askedLong: false, restSet: null, resting: [], rested: {},
+    askedLong: false, restSet: null, resting: [], rested: {}, timers: timerRows(w.timers, now),
   };
   const out = { orders: [], events: [] };
   const ctx = { cook, reading, now, out, on: switches(alerts), all: [reading], temps: tempsNow(cook, [reading], reading) };
@@ -300,6 +315,8 @@ function check({ cook: c0, reading, history, now, alerts }) {
   if (cook.status === 'done' || cook.status === 'stopped') return { cook, orders: [], events: [] };
   cook.alarms = cook.alarms || {}; cook.glitches = cook.glitches || {};
   const ctx = { cook, reading, now, out, on: switches(alerts), all: [], temps: {} };
+  // 0. Timers need no smoker: told once when they're up.
+  for (const t of (cook.timers || [])) if (!t.told && ms(now) >= t.at) { t.told = true; say(out, 'step', `Timer "${t.name}": ${t.minutes} minutes are up.`, { timer: t.name }); }
 
   // 1. Could we read it at all?
   if (!reading) {
@@ -419,6 +436,8 @@ function check({ cook: c0, reading, history, now, alerts }) {
 //   done          Cook done: the pit to its lowest, the rest, then the hold
 //   rested        the rest is over (a probe that isn't reading)           keep  nothing changes (logged)
 //   end           the cook is over                answer <words>  one of an ask's two answers
+//   plan { plan | plan_id's plan, probes?, tells? }  a plan or cooking points on the running cook (the meats it had stay)
+//   timer { name, minutes }   a timer, told once in his chat when it's up
 const ANSWERS = { 'Back to the plan': 'resume', 'Keep mine': 'keep', 'Try again': 'retry', 'Leave it': 'keep', 'End it': 'end', 'End the cook': 'end' };
 function act({ cook: c0, action, value, reading, now, alerts }) {
   const cook = copy(c0), out = { orders: [], events: [] };
@@ -428,7 +447,7 @@ function act({ cook: c0, action, value, reading, now, alerts }) {
     if (ANSWERS[value]) action = ANSWERS[value];
     else { note(out, 'note', `Hector: ${value}.`); return { ok: true, cook, orders: [], events: out.events }; }
   }
-  const needsReading = ['set', 'resume', 'retry', 'done'].includes(action);
+  const needsReading = ['set', 'resume', 'retry', 'done', 'plan'].includes(action);
   if (needsReading && (!reading || mins(reading.at, now) > RULES.staleMinutes)) return fail("I can't read the smoker right now.");
   const ctx = { cook, reading, now, out, on: switches(alerts), all: reading ? [reading] : [], temps: tempsNow(cook, reading ? [reading] : [], reading) };
   const pit = cook.tracks.pit;
@@ -492,11 +511,44 @@ function act({ cook: c0, action, value, reading, now, alerts }) {
     case 'end':
       cook.status = 'done'; cook.endedAt = now; note(out, 'note', 'Cook ended.');
       break;
+    case 'timer': {
+      const t = value && typeof value === 'object' ? value : { minutes: value };
+      const w = withTells(cook.plan, {}, [{ name: t.name || 'timer', minutes: t.minutes }]);
+      if (w.errors.length) return fail(w.errors[0]);
+      cook.timers = (cook.timers || []).concat(timerRows(w.timers, now));
+      note(out, 'note', `Timer "${w.timers[0].name}": ${w.timers[0].minutes} minutes.`);
+      break;
+    }
+    case 'plan': {
+      // A plan, or his cooking points, on a cook that is already running: the new pit track takes over from its first
+      // step; the meats the cook already had stay as they are unless the new plan names the same meat.
+      if (cook.phase !== 'cook') return fail('The cook is done: the rest and the hold run on their own.');
+      const v = value && typeof value === 'object' ? value : {};
+      const w = withTells(v.plan || cook.plan, Object.assign({}, cook.probes, v.probes || {}), v.tells);
+      const merged = copy(w.plan); merged.probes = Array.isArray(merged.probes) ? merged.probes.slice() : []; merged.tracks = Object.assign({}, merged.tracks);
+      const kept = {};
+      for (const r of Object.keys(cook.probes || {})) {
+        if (!merged.probes.includes(r)) merged.probes.push(r);
+        else if (merged.tracks[r]) continue;                           // the new plan speaks for this meat
+        if (cook.plan.tracks[r]) merged.tracks[r] = cook.plan.tracks[r];   // a meat the plan only follows keeps its own line
+        if (cook.tracks[r]) kept[r] = cook.tracks[r];
+      }
+      const errors = validatePlan(merged, reading && reading.range).concat(w.errors, probeErrors(merged, w.probes));
+      if (errors.length) return fail(Array.from(new Set(errors)).join(' '));
+      cook.plan = merged; cook.probes = {};
+      for (const r of merged.probes) if (w.probes[r]) cook.probes[r] = w.probes[r];
+      cook.tracks = kept; cook.status = 'running'; cook.pausedFor = null; cook.pending = null; cook.failed = null;
+      cook.timers = (cook.timers || []).concat(timerRows(w.timers, now));
+      ctx.temps = tempsNow(cook, ctx.all, reading);
+      note(out, 'note', `Now on the plan "${merged.name}".`);
+      for (const role of Object.keys(merged.tracks)) if (!kept[role] && (role === 'pit' || cook.probes[role])) enter(cook, role, 0, ctx);
+      break;
+    }
     default:
       return fail(`Unknown action "${action}".`);
   }
   return { ok: true, cook, orders: out.orders, events: out.events };
 }
 
-const PitEngine = { RULES, ALERTS, switches, validatePlan, startCook, check, act };
+const PitEngine = { RULES, ALERTS, WATCH_PLAN, switches, validatePlan, startCook, check, act };
 if (typeof module !== 'undefined' && module.exports) module.exports = PitEngine;
