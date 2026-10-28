@@ -1,0 +1,21 @@
+{
+  "name": "Monclova low n slow",
+  "for": "brisket, beef ribs, burnt ends, trisket (tri-tip cooked like a brisket), pulled pork",
+  "notes": "Hector 10-28: 200 from ignition for 2 hours, 225 to the stall (20 min without a single degree), 250 right away, an hour later 275 to 197, wrap in butcher paper with beef tallow and off the smoker to rest. Cook done: the pit drops to 150; the meat rests to 160-155, then the hold at 150 (smoker or oven) as long as he can, 12 hours even better.",
+  "max_pit": 275,
+  "probes": ["meat"],
+  "tracks": {
+    "pit": [
+      { "name": "Ignition", "set": 200, "until": { "minutes": 120 },
+        "tell": "Monclova low n slow: pit at 200 for the first 2 hours." },
+      { "name": "Low", "set": 225, "until": { "stall": "meat" },
+        "tell": "2 hours in, meat {meat}°F. Pit to 225 until the stall." },
+      { "name": "Bump", "set": 250, "until": { "minutes": 60 },
+        "tell": "Stall: the meat sat at {meat}°F for 20 minutes. Pit to 250." },
+      { "name": "Push", "set": 275, "until": { "probe": "meat", "at_least": 197 },
+        "tell": "An hour at 250, meat {meat}°F. Pit to 275 until 197." },
+      { "name": "Wrap",
+        "tell": "Meat {meat}°F: wrap it in butcher paper with beef tallow and take it off to rest. Tap Cook done: the pit drops to 150 for the hold." }
+    ]
+  }
+}

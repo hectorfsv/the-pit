@@ -1,0 +1,12 @@
+{
+  "name": "Just watch",
+  "for": "any cook you run yourself",
+  "notes": "No setpoints: it watches the pit and the meat, keeps the graph and every alert that's switched on. Cook done still drops the pit to 150 for the rest and the hold.",
+  "max_pit": 325,
+  "probes": ["meat"],
+  "tracks": {
+    "pit": [
+      { "name": "Watching", "tell": "Watching the pit and the meat. Only you change the smoker." }
+    ]
+  }
+}

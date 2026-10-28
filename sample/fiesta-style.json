@@ -1,0 +1,25 @@
+{
+  "name": "Fiesta style",
+  "for": "pork ribs and/or chicken",
+  "notes": "Hector 10-28: 275 the whole time. Ribs on the same marks as rápido (185 point of interest, 203). Chicken: at 155 wrap in tin foil with butter, straight into a cooler, rest 30 minutes. Works for chicken alone too. Cook done when everything is off: the pit drops to 150 for the rest and the hold; the chicken in the cooler keeps its own 30 minutes.",
+  "max_pit": 275,
+  "probes": ["ribs", "chicken"],
+  "tracks": {
+    "pit": [
+      { "name": "Fiesta", "set": 275, "tell": "Fiesta style: pit at 275 the whole time." }
+    ],
+    "ribs": [
+      { "name": "Bark", "until": { "at_least": 185 } },
+      { "name": "Point of interest", "until": { "at_least": 203 },
+        "tell": "Ribs {ribs}°F, the point of interest: check the bark. Ready: tin foil with butter and BBQ or vinegar sauce, back on until 203. Not yet: keep going.",
+        "ask": ["Wrapped", "Keep going"] },
+      { "name": "Done", "tell": "Ribs {ribs}°F: done. Take them off to rest; tap Cook done when everything's off (the pit drops to 150 for the hold)." }
+    ],
+    "chicken": [
+      { "name": "Cooking", "until": { "at_least": 155 } },
+      { "name": "Cooler", "until": { "minutes": 30 },
+        "tell": "Chicken {chicken}°F: wrap it in tin foil with butter and straight into the cooler. The 30-minute rest starts now." },
+      { "name": "Ready", "tell": "Chicken rested 30 minutes: serve." }
+    ]
+  }
+}

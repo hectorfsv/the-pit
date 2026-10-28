@@ -1,0 +1,19 @@
+{
+  "name": "Rápido y jarioso",
+  "for": "pork ribs, pork",
+  "notes": "Hector 10-28: 250 to 185, the point of interest; judge the bark: wrap in tin foil with butter and BBQ or vinegar sauce, or keep going; back on until 203. Cook done: the pit drops to 150, the rest to 160-155, then the hold.",
+  "max_pit": 250,
+  "probes": ["meat"],
+  "tracks": {
+    "pit": [
+      { "name": "Rápido", "set": 250, "tell": "Rápido y jarioso: pit at 250 the whole way." }
+    ],
+    "meat": [
+      { "name": "Bark", "until": { "at_least": 185 } },
+      { "name": "Point of interest", "until": { "at_least": 203 },
+        "tell": "{meat}°F, the point of interest: check the bark. Ready: tin foil with butter and BBQ or vinegar sauce, back on until 203. Not yet: keep going.",
+        "ask": ["Wrapped", "Keep going"] },
+      { "name": "Done", "tell": "{meat}°F: done. Take it off to rest and tap Cook done: the pit drops to 150 for the hold." }
+    ]
+  }
+}

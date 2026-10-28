@@ -1,0 +1,20 @@
+{
+  "name": "Rápido y jarioso, beef finish",
+  "for": "beef ribs, trisket (tri-tip cooked like a brisket), burnt ends, brisket, pulled pork",
+  "notes": "Hector 10-28, confirmed: rápido at 250 with the 185 bark check, then at 197 wrap in butcher paper with beef tallow and off the smoker to rest. Cook done: the pit drops to 150, the rest to 160-155, then the hold.",
+  "max_pit": 250,
+  "probes": ["meat"],
+  "tracks": {
+    "pit": [
+      { "name": "Rápido", "set": 250, "tell": "Rápido y jarioso: pit at 250 the whole way." }
+    ],
+    "meat": [
+      { "name": "Bark", "until": { "at_least": 185 } },
+      { "name": "Point of interest", "until": { "at_least": 197 },
+        "tell": "{meat}°F, the point of interest: check the bark. Keep going to 197.",
+        "ask": ["Bark's set", "Needs more"] },
+      { "name": "Wrap",
+        "tell": "Meat {meat}°F: wrap it in butcher paper with beef tallow and take it off to rest. Tap Cook done: the pit drops to 150 for the hold." }
+    ]
+  }
+}

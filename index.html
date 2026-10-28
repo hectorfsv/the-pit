@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- No viewport-fit=cover, on purpose: as a home-screen app iOS shades whatever sits under the status bar (the Lounge,
+     2026-09-18). Inset from the bar, iOS paints the bar in theme-color itself. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0A0708">
+<title>The Pit</title>
+<meta name="description" content="The Pit: Hector's smoker, his plans, the meat, the graph.">
+<link rel="icon" href="icons/icon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="icons/icon-16.png" sizes="16x16" type="image/png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="The Pit">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="pit.css">
+</head>
+<body>
+<!-- The Pit: Hector's smoker app. Phone first. The page is a window on the notebook (Supabase): it reads the live cook,
+     the readings, the events and his plans straight from it, and writes two things only: his alert switches and his
+     orders (rows the engine on n8n picks up). The engine, not this page, runs the cook: the phone can sleep.
+     Everything a cook needs to be judged by eye is here as a sample cook (?demo) until the engine is live. -->
+
+<div id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <div class="gate-mark" aria-hidden="true"><span class="ring"></span></div>
+    <h1 class="gate-title">The Pit</h1>
+    <p class="gate-sub">Hector's smoker. The plan runs itself around the meat; you get told.</p>
+    <form id="signin" class="gate-form" autocomplete="on" novalidate>
+      <label class="field"><span>Email</span><input id="email" type="email" name="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required></label>
+      <label class="field"><span>Password</span><input id="password" type="password" name="password" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit" id="signin-btn">Sign in</button>
+      <p class="gate-err" id="signin-err" role="alert" hidden></p>
+    </form>
+    <button class="link" id="see-demo" type="button">Look at a sample cook first</button>
+  </div>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <a class="brand" href="#now" id="brand"><span class="ring" aria-hidden="true"></span><span class="brand-name">The Pit</span></a>
+    <div class="top-right">
+      <button class="chip status" id="status" type="button" aria-live="polite">…</button>
+      <button class="ibtn" id="account" type="button" aria-label="Account and settings">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="demobar" class="demobar" hidden></div>
+
+  <main id="main" class="main" tabindex="-1"></main>
+
+  <div class="bottom">
+    <button id="strip" class="strip" type="button" hidden></button>
+    <div id="actions" class="actions" hidden></div>
+    <nav class="tabs" aria-label="Sections">
+      <a href="#now" data-tab="now"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 1-2-1-6 1-9z"/></svg><span>Now</span></a>
+      <a href="#plans" data-tab="plans"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5h14M5 12h10M5 19h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg><span>Plans</span></a>
+      <a href="#history" data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18 9 11l4 4 7-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg><span>History</span></a>
+      <a href="#alerts" data-tab="alerts"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4" stroke="currentColor" stroke-width="2" stroke-linejoin="round" fill="none"/></svg><span>Alerts</span></a>
+    </nav>
+  </div>
+
+  <div id="sheet-root"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+</div>
+
+<script src="config.js"></script>
+<script src="engine/pit-engine.js"></script>
+<script src="pit-core.js"></script>
+<script src="pit-chart.js"></script>
+<script src="pit-ui.js"></script>
+<script src="pit-sheets.js"></script>
+<script src="pit.js"></script>
+</body>
+</html>
