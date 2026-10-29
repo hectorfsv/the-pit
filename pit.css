@@ -463,3 +463,5 @@ details.sub summary::after{content:'';width:8px;height:8px;border-right:2px soli
 details.sub[open] summary::after{transform:rotate(-135deg)}
 details.sub summary .dim{font-weight:400;font-size:13px}
 details.sub>*:not(summary){margin-bottom:12px}
+
+.empty-cook .go.two{grid-template-columns:auto 1fr;align-items:center}
