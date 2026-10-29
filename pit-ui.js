@@ -23,9 +23,11 @@ function renderStatus() {
   if (S.mode === 'demo') { b.className = 'chip status demo'; b.innerHTML = '<span class="dot"></span>Sample cook'; return; }
   const last = S.cook ? S.readings[S.readings.length - 1] : S.last, now = Date.now();
   if (!last) { b.className = 'chip status'; b.innerHTML = '<span class="dot"></span>no reading yet'; return; }
-  const online = now - last.at <= STALE_MINUTES * MINUTE;
-  b.className = 'chip status ' + (online ? 'on' : 'off');
-  b.innerHTML = `<span class="dot"></span>${online ? 'online, looked ' : 'offline since '}<span data-age="${last.at}" data-mode="${online ? 'ago' : 'clock'}">${online ? fmtAgo(last.at, now) : fmtClock(last.at)}</span>`;
+  const fresh = now - last.at <= STALE_MINUTES * MINUTE;
+  // With no cook nothing looks at the smoker on its own: an old reading is an old look, not an offline smoker.
+  if (!S.cook) { b.className = 'chip status ' + (fresh ? 'on' : ''); b.innerHTML = `<span class="dot"></span>${fresh ? 'read ' : 'last read '}<span data-age="${last.at}" data-mode="${fresh ? 'ago' : 'clock'}">${fresh ? fmtAgo(last.at, now) : fmtClock(last.at)}</span>`; return; }
+  b.className = 'chip status ' + (fresh ? 'on' : 'off');
+  b.innerHTML = `<span class="dot"></span>${fresh ? 'online, looked ' : 'offline since '}<span data-age="${last.at}" data-mode="${fresh ? 'ago' : 'clock'}">${fresh ? fmtAgo(last.at, now) : fmtClock(last.at)}</span>`;
 }
 function renderDemoBar() {
   const bar = $('#demobar'); if (!bar) return;
@@ -145,7 +147,7 @@ function emptyHTML() {
       <div class="v"><div class="k">Setpoint</div><div class="n">${l.set ? l.set + '°' : '<span class="dim">none</span>'}</div></div>
       ${pids.map(p => `<div class="v"><div class="k">Probe ${p.slice(1)}</div><div class="n">${rnd(l.probes[p])}°</div></div>`).join('')}
       <div class="v"><div class="k">Power</div><div class="n ${l.power ? '' : 'dim'}">${l.power ? 'on' : 'off'}</div></div></div>` : '';
-  const heard = l ? `Last heard ${fmtDay(l.at)} at ${fmtClock(l.at)} (<span data-age="${l.at}">${fmtAgo(l.at, now)}</span>).` : 'The smoker has not been read yet.';
+  const heard = l ? `Last read ${fmtDay(l.at)} at ${fmtClock(l.at)} (<span data-age="${l.at}">${fmtAgo(l.at, now)}</span>).${now - l.at > STALE_MINUTES * MINUTE ? ' Nothing looks on its own between cooks: tap Read now for a fresh look.' : ''}` : 'The smoker has not been read yet.';
   return `<section class="empty-cook"><div class="hero"><h2>No cook running</h2><p>${heard}</p>${vals}</div>
     <div class="go"><button type="button" class="btn primary" data-act="start-cook">Start a cook</button><button type="button" class="btn" data-act="read-now">Read now</button></div>
     <div class="go three"><button type="button" class="btn" data-act="set-pit">Set pit</button><button type="button" class="btn" data-act="power">${l ? (l.power ? 'Power off' : 'Power on') : 'Power'}</button><span class="note dim">${l ? `${l.set ? `Set to ${l.set}°F` : 'No setpoint'}, ${l.power ? 'on' : 'off'} at the last look.` : 'Read the smoker once and the app knows whether it is on.'}</span></div>
