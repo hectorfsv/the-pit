@@ -122,9 +122,9 @@ a{color:inherit;text-decoration:none}
 .meat .role{font-weight:600;font-size:15px;text-transform:capitalize}
 .meat .stepname{font-size:12.5px;color:var(--ink-dim)}
 .meat .big{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:4px}
-.meat .temp{font-family:var(--num);font-size:92px;line-height:.82;letter-spacing:.005em;display:inline-flex;align-items:flex-start}
-.meat .temp sup{font-family:var(--mono);font-size:15px;color:var(--ink-dim);margin:6px 0 0 3px;line-height:1}
-.meat .temp.none{color:var(--ink-faint);font-size:60px;line-height:1.1;font-family:var(--disp);font-weight:500;letter-spacing:0}
+.meat .temp{font-family:var(--num);font-size:64px;line-height:.84;letter-spacing:.005em;display:inline-flex;align-items:flex-start}
+.meat .temp sup{font-family:var(--mono);font-size:13px;color:var(--ink-dim);margin:4px 0 0 3px;line-height:1}
+.meat .temp.none{color:var(--ink-faint);font-size:40px;line-height:1.1;font-family:var(--disp);font-weight:500;letter-spacing:0}
 .meat .right{text-align:right;display:grid;gap:3px;justify-items:end;padding-bottom:4px}
 .meat .line{font-size:15px;font-weight:600}
 .meat .line b{font-family:var(--mono);font-weight:600}
@@ -140,14 +140,14 @@ a{color:inherit;text-decoration:none}
 .meat .spark{width:96px;height:30px;flex:none}
 .meat .age{font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
 .meat .resting{font-size:12.5px;color:var(--m1)}
-.pit{background:linear-gradient(180deg,var(--panel-hi),var(--panel));border-radius:var(--radius);padding:12px 16px 12px;border-top:1px solid var(--rule-hot)}
+.pit{background:linear-gradient(180deg,var(--panel-hi),var(--panel));border-radius:var(--radius);padding:14px 16px 12px;border-top:1px solid var(--rule-hot)}
 .pit .head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .pit .role{font-weight:600;font-size:15px}
 .pit .stepname{font-size:12.5px;color:var(--ink-dim)}
 .pit .big{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:2px}
-.pit .temp{font-family:var(--num);font-size:60px;line-height:.84;display:inline-flex;align-items:flex-start;color:var(--ember-hot)}
-.pit .temp sup{font-family:var(--mono);font-size:13px;color:var(--ink-dim);margin:4px 0 0 3px;line-height:1}
-.pit .right{text-align:right;display:grid;gap:3px;justify-items:end;padding-bottom:3px}
+.pit .temp{font-family:var(--num);font-size:96px;line-height:.82;letter-spacing:.005em;display:inline-flex;align-items:flex-start;color:var(--ember-hot)}
+.pit .temp sup{font-family:var(--mono);font-size:15px;color:var(--ink-dim);margin:6px 0 0 3px;line-height:1}
+.pit .right{text-align:right;display:grid;gap:3px;justify-items:end;padding-bottom:4px}
 .pit .set{font-size:15px;font-weight:600}
 .pit .set b{font-family:var(--mono);font-weight:600}
 .pit .heat{font-size:12.5px;color:var(--ink-dim)}
@@ -435,7 +435,8 @@ a{color:inherit;text-decoration:none}
   .now .rightcol{display:grid;gap:14px;position:sticky;top:12px}
   .chart{height:360px}
   .graph .empty{height:360px}
-  .meat .temp{font-size:104px}
+  .pit .temp{font-size:112px}
+  .meat .temp{font-size:72px}
   .actions{padding-left:var(--gut);padding-right:var(--gut)}
   .actions .btn{min-height:52px}
   .sheet{border-radius:18px;margin-bottom:24px}

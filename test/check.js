@@ -50,6 +50,8 @@ const SCENARIOS = [
     if (!/Lid.*not watched/.test(await p.evaluate(text, '.sensors') || '')) f.push('the lid sensor does not read "not watched"');
     if (!/at this pace/.test(await p.evaluate(text, '.meat') || '')) f.push('no "at this pace" line two hours before Cook done');
     const legend = await p.evaluate(count, '.legend button'); if (legend !== 3) f.push(`the legend has ${legend} chips, not 3`);
+    const pc = await p.evaluate(vis, '.pit'), mc = await p.evaluate(vis, '.meat'); if (!pc || !mc || pc.y > mc.y) f.push('the pit card is not above the first meat card (his rule 10-29: the pit first, big)');
+    if (!(await p.evaluate(() => parseFloat(getComputedStyle(document.querySelector('.pit .temp')).fontSize) > parseFloat(getComputedStyle(document.querySelector('.meat .temp')).fontSize)))) f.push('the pit numeral is not bigger than the meat numeral');
     const wide = await p.evaluate(() => innerWidth >= 760); if (wide) { const g = await p.evaluate(vis, '.graph'), m = await p.evaluate(vis, '.meat'); if (g && m && g.x < m.x + m.w) f.push('on a wide screen the graph is not in its own column'); }
     return f; } },
   { name: 'now-stall', url: 'index.html?demo=brisket&at=572#now', vps: ['phone-956'], check: async p => { const f = []; if (!(await p.evaluate(count, '.meat .rate.stall'))) f.push('no stall badge at minute 572 of the brisket'); if (!/the stall/.test(await p.evaluate(text, '.meat .rate') || '')) f.push('the rate line does not name the stall'); return f; } },

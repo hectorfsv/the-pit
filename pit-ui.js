@@ -1,4 +1,4 @@
-/* The Pit — the screens: Now (the meat first, then the pit, the graph, the plan, the log), Plans, History, Alerts,
+/* The Pit — the screens: Now (the pit first and big, then each meat, the graph, the plan, the log), Plans, History, Alerts,
    the live strip and the action bar. Everything is drawn from S and a view built by buildView(); every word from
    the notebook goes through esc(). */
 'use strict';
@@ -53,8 +53,8 @@ function nowHTML(v) {
   const head = `<div class="phase"><h2><span class="tag ${v.phase}">${word}</span>${esc(v.plan.name)}</h2><div class="since">${esc(since)}</div></div>`;
   const meats = v.roles.map(r => meatHTML(r, v)).join(''), pit = pitHTML(v), asks = v.asks.map(askHTML).join('');
   const graph = graphHTML(v), steps = stepsHTML(v), log = logHTML(v.events, v.now, 6, c), sensors = sensorsHTML(v);
-  if (wideScreen()) return `<section class="now">${head}<div class="left">${meats}${pit}${asks}${steps}${sensors}</div><div class="rightcol">${graph}${log}</div></section>`;
-  return `<section class="now">${head}${meats}${pit}${asks}${graph}${steps}${log}${sensors}</section>`;
+  if (wideScreen()) return `<section class="now">${head}<div class="left">${pit}${meats}${asks}${steps}${sensors}</div><div class="rightcol">${graph}${log}</div></section>`;
+  return `<section class="now">${head}${pit}${meats}${asks}${graph}${steps}${log}${sensors}</section>`;
 }
 function meatHTML(r, v) {
   const temp = r.temp == null ? '<div class="temp none">not reading</div>' : `<div class="temp${r.stale ? ' stale' : ''}">${rnd(r.temp)}<sup>°F</sup></div>`;
@@ -223,7 +223,7 @@ function renderStrip(v) {
   const s = $('#strip'); if (!s) return;
   if (!v || S.tab === 'now' || v.cook.endedAt || (S.mode === 'demo' && v.cook.status !== 'running')) { s.hidden = true; return; }
   s.hidden = false;
-  s.innerHTML = `<span class="ph">${PHASE_WORD[v.phase] || 'Cooking'}</span>${v.roles.map(r => `<span class="v"><span class="key" style="background:${r.color}"></span><span class="n">${r.temp == null ? '—' : rnd(r.temp) + '°'}</span><span class="k">${esc(r.role)}</span></span>`).join('')}<span class="v"><span class="key" style="background:${PIT_COLOR}"></span><span class="n">${v.pit.temp == null ? '—' : rnd(v.pit.temp) + '°'}</span><span class="k">pit${v.pit.set ? ' / ' + v.pit.set : ''}</span></span><span class="go">Now ›</span>`;
+  s.innerHTML = `<span class="ph">${PHASE_WORD[v.phase] || 'Cooking'}</span><span class="v"><span class="key" style="background:${PIT_COLOR}"></span><span class="n">${v.pit.temp == null ? '—' : rnd(v.pit.temp) + '°'}</span><span class="k">pit${v.pit.set ? ' / ' + v.pit.set : ''}</span></span>${v.roles.map(r => `<span class="v"><span class="key" style="background:${r.color}"></span><span class="n">${r.temp == null ? '—' : rnd(r.temp) + '°'}</span><span class="k">${esc(r.role)}</span></span>`).join('')}<span class="go">Now ›</span>`;
 }
 function renderActions(v) {
   const a = $('#actions'); if (!a) return;

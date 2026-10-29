@@ -4,7 +4,7 @@
 'use strict';
 const CFG = window.PIT_CONFIG || {};
 const ENGINE = typeof PitEngine !== 'undefined' ? PitEngine : null;
-const APP_VERSION = '202610281829';
+const APP_VERSION = '202610282206';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // one per meat in the plan's order; the six checks pass on the panel
 const PIT_COLOR = '#E8632A', PANEL_COLOR = '#15100F', INK = '#F2EAE8', INK_DIM = '#9A8C8A', INK_FAINT = '#5E5250';
 const MINUTE = 60000, HOUR = 3600000;
