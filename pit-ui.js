@@ -214,7 +214,8 @@ function pastHTML(id) {
 function alertsHTML() {
   const on = ENGINE ? ENGINE.switches(S.pit && S.pit.alerts) : {};
   const rows = ENGINE ? Object.entries(ENGINE.ALERTS) : [];
-  return `<section class="alerts"><p class="intro">Each alert only tells you, in your Jarvis chat, once and again every 30 minutes while it lasts. Nothing ever pauses the plan. <span class="nw">Off means not watched at all.</span> A flip counts from the engine's next look.</p>
+  return `<section class="alerts"><p class="intro">Each alert only tells you, in your Jarvis chat and on a phone with alerts on, once and again every 30 minutes while it lasts. Nothing ever pauses the plan. <span class="nw">Off means not watched at all.</span> A flip counts from the engine's next look.</p>
+    ${phoneAlertsHTML()}
     ${rows.map(([k, a]) => `<div class="sw"><div><div class="n">${esc(a.name)}</div><div class="w">${esc(a.when)}${k === 'lid' ? ' <span class="nw">(your lid and hopper sensors read closed no matter what)</span>' : ''}</div></div><button type="button" class="tog" role="switch" aria-checked="${on[k] ? 'true' : 'false'}" data-act="toggle" data-v="${k}" aria-label="${esc(a.name)}"><i></i></button></div>`).join('')}</section>`;
 }
 

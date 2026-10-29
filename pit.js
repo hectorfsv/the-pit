@@ -28,7 +28,7 @@ async function enterLive() {
   S.mode = 'live'; S.now = () => Date.now(); $('#gate').hidden = true; $('#app').hidden = false; $('#demobar').hidden = true;
   try { await loadLive(); }
   catch (e) { if (/Signed out|expired|Not signed in/.test(e.message)) { showGate(); const m = $('#signin-err'); m.textContent = e.message; m.hidden = false; return; } toast('Could not read the notebook: ' + e.message, 'bad', 8000); }
-  renderAll(); startPolling();
+  renderAll(); startPolling(); pushSync();
   if (S.tab === 'plans') loadPlans().then(renderAll).catch(err); if (S.tab === 'history') loadHistory().then(renderAll).catch(err);
 }
 async function loadLive() {
@@ -132,7 +132,7 @@ function boot() {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode === 'live') refreshLive(false); });
   let wasWide = wideScreen();
   window.addEventListener('resize', () => { const w = wideScreen(); if (w !== wasWide) { wasWide = w; renderAll(); } });
-  readHash();
+  readHash(); pushInit();
   if (q.has('demo')) return enterDemo(q.get('demo') || 'brisket', q.has('at') ? +q.get('at') : null);
   const sess = store.get('pit.session');
   if (sess && sess.refresh_token) { S.session = sess; return enterLive(); }

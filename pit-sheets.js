@@ -3,7 +3,7 @@
 'use strict';
 const ACTION_WORDS = { set: v => `Set the pit to ${v}°F`, next: () => 'Next step', pause: () => 'Pause the plan', resume: () => 'Back to the plan', done: () => 'Cook done', rested: () => 'Rested',
   end: () => 'End the cook', answer: v => `“${v}”`, power: v => v ? 'Power on' : 'Power off', read: () => 'Read the smoker', start: () => 'Start the cook', save_plan: () => 'Save the plan',
-  archive_plan: () => 'Archive the plan', note: () => 'Save the note', rate: () => 'Rate the cook', units_f: () => 'Switch the smoker to °F', keep: () => 'Keep it', retry: () => 'Try again' };
+  archive_plan: () => 'Archive the plan', note: () => 'Save the note', rate: () => 'Rate the cook', units_f: () => 'Switch the smoker to °F', keep: () => 'Keep it', retry: () => 'Try again', ping: () => 'Test alert to your phones' };
 const describeOrder = (a, v) => (ACTION_WORDS[a] || (() => a))(v);
 
 // ---- toasts ---------------------------------------------------------------------------------------------------
@@ -348,6 +348,9 @@ function onMainClick(e) {
   else if (act === 'save-note') { const c = S.history.find(h => h.id === S.sub); if (!c) return; c.notes = $('#note-text').value; if (S.mode === 'demo') { store.set(`pit.demo.notes.${c.id.replace('demo-', '')}`, c.notes); toast('Note kept on this device (sample mode).', 'good'); } else placeOrder('note', { cook_id: c.id, text: c.notes }, { cookId: c.id }); }
   else if (act === 'csv') downloadCsv();
   else if (act === 'toggle') toggleAlert(v, b);
+  else if (act === 'push-on') pushOn(b);
+  else if (act === 'push-off') pushOff(b);
+  else if (act === 'push-test') pushTest();
 }
 function onActionsClick(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;

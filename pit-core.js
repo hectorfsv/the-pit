@@ -4,7 +4,7 @@
 'use strict';
 const CFG = window.PIT_CONFIG || {};
 const ENGINE = typeof PitEngine !== 'undefined' ? PitEngine : null;
-const APP_VERSION = '202610282206';
+const APP_VERSION = '202610282217';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // one per meat in the plan's order; the six checks pass on the panel
 const PIT_COLOR = '#E8632A', PANEL_COLOR = '#15100F', INK = '#F2EAE8', INK_DIM = '#9A8C8A', INK_FAINT = '#5E5250';
 const MINUTE = 60000, HOUR = 3600000;
@@ -77,6 +77,8 @@ const sb = {
   get(path) { return this.rest(path); },
   insert(table, row) { return this.rest(table, { method: 'POST', body: JSON.stringify(row), headers: { Prefer: 'return=representation' } }); },
   patch(path, body) { return this.rest(path, { method: 'PATCH', body: JSON.stringify(body), headers: { Prefer: 'return=representation' } }); },
+  upsert(table, row, onConflict) { return this.rest(`${table}?on_conflict=${onConflict}`, { method: 'POST', body: JSON.stringify(row), headers: { Prefer: 'resolution=merge-duplicates,return=representation' } }); },
+  del(path) { return this.rest(path, { method: 'DELETE' }); },
   signOut() {
     const s = S.session; S.session = null; store.del('pit.session');
     if (s) fetch(`${this.url}/auth/v1/logout`, { method: 'POST', headers: { apikey: this.key, Authorization: 'Bearer ' + s.access_token } }).catch(() => {});
