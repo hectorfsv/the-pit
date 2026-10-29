@@ -5,4 +5,5 @@ cd "$(dirname "$0")/.."
 S=$(date +%Y%m%d%H%M)
 sed -E -i '' "s/(\.(css|js))\?v=[0-9a-z]*\"/\1?v=$S\"/g" index.html
 sed -E -i '' "s/const APP_VERSION = '[^']*'/const APP_VERSION = '$S'/" pit-core.js
+printf '{ "version": "%s" }\n' "$S" > version.json
 echo "stamped $S: $(grep -c "?v=$S" index.html) files in index.html"

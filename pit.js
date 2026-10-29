@@ -83,7 +83,12 @@ function fastPoll(seconds) { S.fastUntil = Date.now() + seconds * 1000; schedule
 function nextDelay() { if (Date.now() < S.fastUntil) return 3000; return S.cook ? 30000 : 60000; }
 function schedule(ms) { clearTimeout(S.timer); S.timer = setTimeout(pollTick, ms); }
 async function pollTick() { if (S.mode !== 'live') return; if (document.visibilityState === 'visible') await refreshLive(false); schedule(nextDelay()); }
-function startPolling() { schedule(nextDelay()); if (!S.ageTimer) S.ageTimer = setInterval(tickAges, 10000); }
+function startPolling() { schedule(nextDelay()); if (!S.ageTimer) S.ageTimer = setInterval(tickAges, 10000); if (!S.verTimer) S.verTimer = setInterval(checkVersion, 60000); }
+// A home-screen app keeps the page for ten minutes; this tells him sooner, and a tap reloads (a reload refetches index.html).
+async function checkVersion() {
+  if (document.visibilityState !== 'visible' || S.newVersion) return;
+  try { const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); const j = await r.json(); if (j.version && j.version !== APP_VERSION) { S.newVersion = j.version; const t = toast('A newer version of The Pit is ready. Tap here to load it.', 'good', 0); t.el.addEventListener('click', () => location.reload()); } } catch (e) { /* offline: fine */ }
+}
 function stopPolling() { clearTimeout(S.timer); S.timer = null; }
 
 // ---- the sample cooks -----------------------------------------------------------------------------------------
@@ -93,7 +98,7 @@ async function enterDemo(which, atMinutes) {
   try { await loadDemoData(); } catch (e) { toast('Could not load the sample cooks: ' + e.message, 'bad', 8000); return; }
   S.plans = DEMO.planRows.slice(); S.plansAt = Date.now(); S.historyAt = Date.now(); S.hidden = {};
   if (atMinutes != null && DEMO.data[DEMO.which]) DEMO.t = DEMO.data[DEMO.which].t0 + atMinutes * MINUTE;
-  applyDemo(); if (!S.ageTimer) S.ageTimer = setInterval(tickAges, 10000);
+  applyDemo(); if (!S.ageTimer) S.ageTimer = setInterval(tickAges, 10000); if (!S.verTimer) S.verTimer = setInterval(checkVersion, 60000);
   renderAll();
 }
 function applyDemo() {
