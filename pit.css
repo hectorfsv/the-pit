@@ -465,3 +465,6 @@ details.sub summary .dim{font-weight:400;font-size:13px}
 details.sub>*:not(summary){margin-bottom:12px}
 
 .empty-cook .go.two{grid-template-columns:auto 1fr;align-items:center}
+
+.empty-cook .go.three{grid-template-columns:auto auto 1fr;align-items:center}
+@media (max-width:420px){.empty-cook .go.three{grid-template-columns:1fr 1fr}.empty-cook .go.three .note{grid-column:1/-1}}

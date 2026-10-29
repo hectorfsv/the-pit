@@ -323,6 +323,7 @@ function onMainClick(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act, v = b.dataset.v;
   if (act === 'start-cook') openNewCook();
+  else if (act === 'set-pit') openSetPit();
   else if (act === 'read-now') openReadNow();
   else if (act === 'expand') openFullChart();
   else if (act === 'legend') { S.hidden[v] = !S.hidden[v]; b.classList.toggle('off', !!S.hidden[v]); b.setAttribute('aria-pressed', String(!S.hidden[v])); if (S.chart && S.view) S.chart.setData(chartDataOf(S.view)); }

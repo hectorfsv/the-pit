@@ -148,7 +148,7 @@ function emptyHTML() {
   const heard = l ? `Last heard ${fmtDay(l.at)} at ${fmtClock(l.at)} (<span data-age="${l.at}">${fmtAgo(l.at, now)}</span>).` : 'The smoker has not been read yet.';
   return `<section class="empty-cook"><div class="hero"><h2>No cook running</h2><p>${heard}</p>${vals}</div>
     <div class="go"><button type="button" class="btn primary" data-act="start-cook">Start a cook</button><button type="button" class="btn" data-act="read-now">Read now</button></div>
-    <div class="go two"><button type="button" class="btn" data-act="power">${l ? (l.power ? 'Power off' : 'Power on') : 'Power'}</button><span class="note dim">${l ? `The smoker was ${l.power ? 'on' : 'off'} at the last look.` : 'Read the smoker once and the app knows whether it is on.'}</span></div>
+    <div class="go three"><button type="button" class="btn" data-act="set-pit">Set pit</button><button type="button" class="btn" data-act="power">${l ? (l.power ? 'Power off' : 'Power on') : 'Power'}</button><span class="note dim">${l ? `${l.set ? `Set to ${l.set}°F` : 'No setpoint'}, ${l.power ? 'on' : 'off'} at the last look.` : 'Read the smoker once and the app knows whether it is on.'}</span></div>
     <p class="note dim">Set the pit, name the meat on each probe with the temperature to tell you at, add cooking points if you want the smoker to change on its own. The engine looks every two minutes and tells you in your Jarvis chat; your phone can sleep. A plan from the Plans tab can join at any time.</p></section>`;
 }
 
