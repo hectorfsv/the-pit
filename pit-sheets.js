@@ -61,15 +61,19 @@ async function placeOrder(action, value, opts) {
   try { inserted = (await sb.insert('orders', row))[0]; } catch (e) { toast('Could not write the order: ' + e.message, 'bad'); return null; }
   S.orders.push({ id: inserted.id, action, value, at: Date.now(), status: 'waiting' });
   const t = toast(`${describeOrder(action, value)}: waiting for the engine…`, 'wait', 0);
-  try {
+  // The ring. A ring that lands while the cook's look is running is turned away (409) and the page can't see that
+  // (no-cors), so an order still waiting after 12 and 24 seconds is rung again; the look itself takes about 10.
+  const ring = async () => { try {
     if (live && S.cook.runnerUrl) await fetch(S.cook.runnerUrl, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ order_id: inserted.id }) });
     else if (CFG.doorUrl) await fetch(`${CFG.doorUrl}?order_id=${encodeURIComponent(inserted.id)}`, { method: 'POST', mode: 'no-cors' });
-  } catch (e) { /* the engine's next look picks the order up anyway */ }
+  } catch (e) { /* the engine's next look picks the order up anyway */ } };
+  await ring();
   fastPoll(90);
-  const t0 = Date.now();
+  const t0 = Date.now(); let rings = 1;
   const watch = async () => {
     try {
       const rows = await sb.get(`orders?id=eq.${inserted.id}&select=status,result`), o = rows && rows[0];
+      if (o && o.status === 'waiting' && rings < 3 && Date.now() - t0 > rings * 12000) { rings++; await ring(); }
       if (o && o.status !== 'waiting') {
         const mine = S.orders.find(x => x.id === inserted.id); if (mine) mine.status = o.status;
         const errs = o.result && o.result.errors && o.result.errors.length ? o.result.errors.join(' ') : '';
