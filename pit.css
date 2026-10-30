@@ -26,12 +26,12 @@ a{color:inherit;text-decoration:none}
 .mono{font-family:var(--mono);font-weight:500;font-variant-numeric:tabular-nums}
 .dim{color:var(--ink-dim)}
 .faint{color:var(--ink-faint)}
-.ring{display:inline-block;width:18px;height:18px;border-radius:50%;border:3px solid var(--ember);box-shadow:inset 0 0 0 3px var(--void),inset 0 0 0 6px var(--ember-hot);vertical-align:-3px}
+.mark{display:block;flex:none;width:33px;height:30px}
 
 /* ---- the gate ---- */
 .gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:32px var(--gut)}
 .gate-card{width:100%;max-width:360px}
-.gate-mark .ring{width:64px;height:64px;border-width:9px;box-shadow:inset 0 0 0 7px var(--void),inset 0 0 0 16px var(--ember-hot);margin-bottom:22px}
+.gate-mark .mark{width:88px;height:80px;margin-bottom:22px}
 .gate-title{font-family:var(--num);font-size:64px;line-height:.9;letter-spacing:.02em}
 .gate-sub{color:var(--ink-dim);margin:10px 0 26px;max-width:30ch}
 .gate-form{display:grid;gap:12px}

@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Chakra+Petch:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="pit.css?v=202610282217">
+<link rel="stylesheet" href="pit.css?v=202610301403">
 </head>
 <body>
 <!-- The Pit: Hector's smoker app. Phone first. The page is a window on the notebook (Supabase): it reads the live cook,
@@ -26,9 +26,20 @@
      orders (rows the engine on n8n picks up). The engine, not this page, runs the cook: the phone can sleep.
      Everything a cook needs to be judged by eye is here as a sample cook (?demo) until the engine is live. -->
 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="smoker" viewBox="44 56 424 384">
+  <rect x="64" y="232" width="276" height="150" rx="18" fill="#E8632A"/>
+  <path d="M64 232 l0 -26 q0-16 16-16 l244 0 q16 0 16 16 l0 26z" fill="#C9552F"/>
+  <rect x="352" y="150" width="96" height="232" rx="14" fill="#E8632A"/>
+  <rect x="352" y="150" width="96" height="36" rx="10" fill="#FFB37A"/>
+  <rect x="88" y="382" width="22" height="48" fill="#9A8C8A"/><rect x="294" y="382" width="22" height="48" fill="#9A8C8A"/><rect x="372" y="382" width="22" height="48" fill="#9A8C8A"/><rect x="418" y="382" width="22" height="48" fill="#9A8C8A"/>
+  <rect x="100" y="140" width="34" height="56" rx="6" fill="#C9552F"/>
+  <path d="M117 128c-22-20 20-36-2-58" fill="none" stroke="#F2EAE8" stroke-width="12" stroke-linecap="round" opacity=".85"/>
+  <circle cx="202" cy="307" r="12" fill="#1C0C04"/><circle cx="246" cy="307" r="12" fill="#1C0C04"/>
+</symbol></svg>
+
 <div id="gate" class="gate" hidden>
   <div class="gate-card">
-    <div class="gate-mark" aria-hidden="true"><span class="ring"></span></div>
+    <div class="gate-mark" aria-hidden="true"><svg class="mark"><use href="#smoker"/></svg></div>
     <h1 class="gate-title">The Pit</h1>
     <p class="gate-sub">Hector's smoker. The plan runs itself around the meat; you get told.</p>
     <form id="signin" class="gate-form" autocomplete="on" novalidate>
@@ -43,7 +54,7 @@
 
 <div id="app" hidden>
   <header class="top">
-    <a class="brand" href="#now" id="brand"><span class="ring" aria-hidden="true"></span><span class="brand-name">The Pit</span></a>
+    <a class="brand" href="#now" id="brand"><svg class="mark" aria-hidden="true"><use href="#smoker"/></svg><span class="brand-name">The Pit</span></a>
     <div class="top-right">
       <button class="chip status" id="status" type="button" aria-live="polite">…</button>
       <button class="ibtn" id="account" type="button" aria-label="Account and settings">
@@ -71,13 +82,13 @@
   <div id="toasts" class="toasts" aria-live="polite"></div>
 </div>
 
-<script src="config.js?v=202610282217"></script>
-<script src="engine/pit-engine.js?v=202610282217"></script>
-<script src="pit-core.js?v=202610282217"></script>
-<script src="pit-chart.js?v=202610282217"></script>
-<script src="pit-ui.js?v=202610282217"></script>
-<script src="pit-sheets.js?v=202610282217"></script>
-<script src="pit-push.js?v=202610282217"></script>
-<script src="pit.js?v=202610282217"></script>
+<script src="config.js?v=202610301403"></script>
+<script src="engine/pit-engine.js?v=202610301403"></script>
+<script src="pit-core.js?v=202610301403"></script>
+<script src="pit-chart.js?v=202610301403"></script>
+<script src="pit-ui.js?v=202610301403"></script>
+<script src="pit-sheets.js?v=202610301403"></script>
+<script src="pit-push.js?v=202610301403"></script>
+<script src="pit.js?v=202610301403"></script>
 </body>
 </html>
