@@ -4,7 +4,7 @@
 'use strict';
 const CFG = window.PIT_CONFIG || {};
 const ENGINE = typeof PitEngine !== 'undefined' ? PitEngine : null;
-const APP_VERSION = '202610301403';
+const APP_VERSION = '202610302100';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // one per meat in the plan's order; the six checks pass on the panel
 const PIT_COLOR = '#E8632A', PANEL_COLOR = '#15100F', INK = '#F2EAE8', INK_DIM = '#9A8C8A', INK_FAINT = '#5E5250';
 const MINUTE = 60000, HOUR = 3600000;
@@ -280,12 +280,13 @@ function csvOf(readings, roles) {
 }
 
 // ---- the probes a pit can read, and the plan the basic start writes -------------------------------------------
-// The smoker's four ports today (p0–p3, shown as Probe 1–4). A wireless thermometer later: its driver lists its ids in
-// pits.probes and writes them into readings.probes; anything seen in a reading shows up here too.
+// The smoker's ports today: its shadow numbers them from 1, like its panel (p1 = Probe 1; it has never reported a p0).
+// A wireless thermometer later: its driver lists its ids in pits.probes and writes them into readings.probes; anything
+// reading a number shows up here too.
 function probeSources() {
-  const list = S.pit && Array.isArray(S.pit.probes) && S.pit.probes.length ? S.pit.probes.map(p => ({ id: p.id, label: p.label || p.id })) : [0, 1, 2, 3].map(i => ({ id: 'p' + i, label: 'Probe ' + (i + 1) }));
+  const list = S.pit && Array.isArray(S.pit.probes) && S.pit.probes.length ? S.pit.probes.map(p => ({ id: p.id, label: p.label || p.id })) : [1, 2, 3].map(i => ({ id: 'p' + i, label: 'Probe ' + i }));
   const seen = S.cook ? (S.readings[S.readings.length - 1] || {}).probes : (S.last || {}).probes;
-  for (const id of Object.keys(seen || {})) if (!list.some(p => p.id === id)) list.push({ id, label: id.toUpperCase() });
+  for (const id of Object.keys(seen || {})) if (seen[id] != null && !list.some(p => p.id === id)) list.push({ id, label: id.toUpperCase() });
   return list;
 }
 const slugRole = name => String(name || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^[_0-9]+|_+$/g, '');

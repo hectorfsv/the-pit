@@ -107,7 +107,7 @@ function applyDemo() {
   const d = DEMO.data[DEMO.which];
   if (!d) {   // "no cook running": the smoker as it was at the end of the brisket, read ten minutes ago
     const b = DEMO.data.brisket, last = b.readings[b.readings.length - 1], now = Date.now();
-    S.cook = null; S.readings = []; S.events = []; S.now = () => now; S.last = Object.assign({}, last, { at: now - 40 * 1000, set: 0, heating: false, probes: { p0: 71.5 } });
+    S.cook = null; S.readings = []; S.events = []; S.now = () => now; S.last = Object.assign({}, last, { at: now - 40 * 1000, set: 0, heating: false, probes: { p1: 71.5 } });
     return;
   }
   if (DEMO.t == null) DEMO.t = d.tDone ? d.tDone - 2 * HOUR : d.t0 + (d.tEnd - d.t0) * 0.7;

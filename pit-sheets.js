@@ -179,7 +179,8 @@ function openNewCook() {
 // A plan from the Plans tab: which probe is in which of its meats, then Start, or use it on the running cook.
 function assignHTML(row, current) {
   const src = probeSources(), last = S.last || (S.view && S.view.last) || null;
-  return `<div class="assign">${(row.plan.probes || []).map((r, i) => `<div class="a"><div class="r" style="--c:${MEAT_COLORS[i % 4]}"><i></i>${esc(r)}</div><label class="field"><select data-role="${esc(r)}"><option value="">no probe</option>${src.map((p, j) => `<option value="${esc(p.id)}"${(current && current[r] === p.id) || (!(current && current[r]) && j === i) ? ' selected' : ''}>${esc(p.label)}${last && last.probes && last.probes[p.id] != null ? `, ${rnd(last.probes[p.id])}°` : ''}</option>`).join('')}</select></label></div>`).join('')}</div>`;
+  const live = src.filter(p => last && last.probes && last.probes[p.id] != null);   // the first pick is a probe that reads, never an empty port
+  return `<div class="assign">${(row.plan.probes || []).map((r, i) => `<div class="a"><div class="r" style="--c:${MEAT_COLORS[i % 4]}"><i></i>${esc(r)}</div><label class="field"><select data-role="${esc(r)}"><option value="">no probe</option>${src.map(p => `<option value="${esc(p.id)}"${(current && current[r] === p.id) || (!(current && current[r]) && p === (live.length ? live[i] : src[i])) ? ' selected' : ''}>${esc(p.label)}${last && last.probes && last.probes[p.id] != null ? `, ${rnd(last.probes[p.id])}°` : ''}</option>`).join('')}</select></label></div>`).join('')}</div>`;
 }
 const readAssign = sh => { const probes = {}; $$('select[data-role]', sh).forEach(x => { if (x.value) probes[x.dataset.role] = x.value; }); return probes; };
 function openStartPlan(row) {
