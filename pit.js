@@ -24,7 +24,7 @@ async function onSignIn(e) {
   catch (ex) { msg.textContent = ex.message; msg.hidden = false; }
   btn.disabled = false; btn.textContent = 'Sign in';
 }
-function signOutToGate() { sb.signOut(); S.cook = null; S.readings = []; S.events = []; S.last = null; S.idle = null; S.history = []; S.histData = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; showGate(); }
+function signOutToGate() { sb.signOut(); S.cook = null; S.readings = []; S.events = []; S.last = null; S.history = []; S.histData = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; showGate(); }
 
 // ---- live -----------------------------------------------------------------------------------------------------
 async function enterLive() {
@@ -54,14 +54,7 @@ async function loadHistData(id) {
   } catch (e) { toast('Could not load that cook: ' + e.message, 'bad'); }
   return S.histData[id];
 }
-const signature = () => JSON.stringify([S.cook && [S.cook.id, S.cook.status, S.cook.phase, S.cook.pending, S.cook.failed, S.cook.names, S.cook.marks, S.cook.probes], S.readings.length, S.events.length, S.last && [S.last.at, S.last.power], S.idle && S.idle.cook.id, S.pit && S.pit.alerts, S.tab, S.sub]);
-// The last session, so the screen keeps its graph with the smoker off. A refused start has no plan and no readings.
-async function loadIdle() {
-  const rows = await sb.get('cooks?status=in.(done,stopped)&order=started_at.desc&limit=5&select=id,pit_id,plan_id,meat,weight_lb,status,state,started_at,ended_at,notes,rating');
-  const row = rows.find(r => r.state && r.state.plan); if (!row) { S.idle = null; return; }
-  if (S.idle && S.idle.cook.id === row.id) return;
-  const d = await loadHistData(row.id); if (d) S.idle = { cook: normCook(row), readings: d.readings, events: d.events };
-}
+const signature = () => JSON.stringify([S.cook && [S.cook.id, S.cook.status, S.cook.phase, S.cook.pending, S.cook.failed, S.cook.names, S.cook.marks, S.cook.probes], S.readings.length, S.events.length, S.last && [S.last.at, S.last.power], S.pit && S.pit.alerts, S.tab, S.sub]);
 // No session: nothing reads the smoker between cooks (the live part is parked), so opening The Pit is the look: one read,
 // one n8n run, at most one in 10 minutes across every screen. A read that finds the smoker on opens the session (the Door).
 async function lookOnOpen() {
@@ -89,10 +82,8 @@ async function refreshLive(full) {
       if (es.length) S.events = S.events.concat(es.map(normEvent).filter(Boolean));
       S.last = S.readings[S.readings.length - 1] || S.last;
     } else {
-      const ended = !!S.cook;
       if (S.cook) { S.cook = null; S.readings = []; S.events = []; S.historyAt = 0; }
       const last = await sb.get(`readings?order=at.desc&limit=1&select=${READING_COLS}`); S.last = last[0] ? normReading(last[0]) : null;
-      if (ended || full || !S.idle) await loadIdle();
     }
     if (full || Date.now() - (S.pitAt || 0) > 5 * MINUTE) { const pits = await sb.get('pits?select=id,name,range_min,range_max,alerts&order=created_at.asc&limit=1'); if (pits[0]) S.pit = pits[0]; S.pitAt = Date.now(); }
     S.error = null;
@@ -136,10 +127,9 @@ function applyDemo() {
     S.cook = { id: 'demo-open', status: 'running', auto: true, plan: JSON.parse(JSON.stringify(ENGINE.WATCH_PLAN)), probes: {}, names: {}, marks: [], tracks: { pit: { step: 0, since: b.t0 } }, phase: 'cook', phaseAt: b.t0, startedAt: b.t0, endedAt: null, resting: [], rested: {}, restSet: null, pending: null, failed: null, alarms: {}, timers: [], meat: null, weightLb: null, notes: '', rating: null, runnerUrl: null, demo: true };
     return;
   }
-  if (!d) {   // no session: the smoker off, read a moment ago, the last cook's graph still on screen
+  if (!d) {   // no session: the smoker off, read a moment ago
     const b = DEMO.data.brisket, last = b.readings[b.readings.length - 1], now = Date.now();
     S.cook = null; S.readings = []; S.events = []; S.now = () => now; S.last = Object.assign({}, last, { at: now - 40 * 1000, set: 0, heating: false, power: false, probes: { p1: 71.5 } });
-    S.idle = { cook: S.history.find(h => h.id === 'demo-brisket'), readings: b.readings, events: b.events };
     return;
   }
   if (DEMO.t == null) DEMO.t = d.tDone ? d.tDone - 2 * HOUR : d.t0 + (d.tEnd - d.t0) * 0.7;
@@ -149,7 +139,7 @@ function applyDemo() {
   S.cook = demoCookAt(d, t); S.readings = rs.filter(r => r.at <= t); S.events = d.events.filter(e => e.at <= t);
   S.last = S.readings[S.readings.length - 1] || null;
 }
-function leaveDemo() { S.mode = null; S.cook = null; S.readings = []; S.events = []; S.last = null; S.idle = null; S.history = []; S.histData = {}; S.hidden = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; S.now = () => Date.now(); $('#demobar').hidden = true; if (S.session) enterLive(); else showGate(); }
+function leaveDemo() { S.mode = null; S.cook = null; S.readings = []; S.events = []; S.last = null; S.history = []; S.histData = {}; S.hidden = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; S.now = () => Date.now(); $('#demobar').hidden = true; if (S.session) enterLive(); else showGate(); }
 
 // ---- boot -----------------------------------------------------------------------------------------------------
 function boot() {

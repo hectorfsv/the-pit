@@ -19,8 +19,8 @@ function renderAll() {
   const place = TV ? focusKey() : null;
   renderStatus(); renderDemoBar();
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === S.tab));
-  const idle = !S.cook && S.tab === 'now' ? idleCook() : null, was = S.idle || { readings: [], events: [] };
-  const v = S.view = S.cook ? buildView(S.cook, S.readings, S.events, S.now()) : idle ? buildView(idle, was.readings, was.events, S.now(), S.last) : null;
+  const idle = !S.cook && S.tab === 'now' ? idleCook() : null;
+  const v = S.view = S.cook ? buildView(S.cook, S.readings, S.events, S.now()) : idle ? buildView(idle, [], [], S.now(), S.last) : null;
   const main = $('#main');
   if (S.tab === 'now') main.innerHTML = nowHTML(v);
   else if (S.tab === 'plans') main.innerHTML = S.sub ? planViewHTML(S.sub) : plansHTML();
@@ -73,6 +73,8 @@ function nowHTML(v) {
   const pit = pitHTML(v), asks = v.asks.map(askHTML).join('');
   const graph = graphHTML(v), log = logHTML(v.events, v.now, 6, c), sensors = sensorsHTML(v);
   const steps = v.hasPlan ? stepsHTML(v) : `<section class="steps"><h3>No plan running <button type="button" class="mini" data-act="go-plans">Run a plan</button>${c.idle ? '' : ' <button type="button" class="mini" data-act="points">Cooking points</button>'}</h3></section>`;
+  // A new screen is the smoker now. Nothing of the last cook (his word 11-02): that lives in History.
+  if (c.idle) return `<section class="now idle">${pit}${meats}${steps}${sensors}</section>`;
   if (wideScreen()) return `<section class="now">${head}<div class="left">${pit}${meats}${asks}${steps}${sensors}</div><div class="rightcol">${graph}${log}</div></section>`;
   return `<section class="now">${head}${pit}${meats}${asks}${graph}${steps}${log}${sensors}</section>`;
 }
@@ -127,8 +129,7 @@ function legendHTML(v) {
 }
 function graphHTML(v) {
   if (!readingsOf(v).length) return '<section class="graph"><div class="empty">No readings yet. The first look draws the first point.</div></section>';
-  const when = v.cook.idle ? `<div class="gwhen">Your last session, ${fmtDay(v.cook.startedAt)}, ${fmtDur((v.cook.endedAt - v.cook.startedAt) / MINUTE)}</div>` : '';
-  return `<section class="graph">${when}<div class="ghead">${legendHTML(v)}<button type="button" class="expand" data-act="expand">Full graph</button></div><div class="chart" id="chart"><canvas></canvas><div class="scrub"></div><div class="readout"></div></div></section>`;
+  return `<section class="graph"><div class="ghead">${legendHTML(v)}<button type="button" class="expand" data-act="expand">Full graph</button></div><div class="chart" id="chart"><canvas></canvas><div class="scrub"></div><div class="readout"></div></div></section>`;
 }
 function stepsHTML(v) {
   const p = v.pit, c = v.cook, cookPhase = v.phase === 'cook' || v.phase === 'paused';

@@ -8,7 +8,7 @@ const ENGINE = typeof PitEngine !== 'undefined' ? PitEngine : null;
 // and Select as Enter; only html.tv and the lines behind TV change anything, so the phone never sees any of it.
 const TV = /\bAFT[A-Z0-9]/.test(navigator.userAgent) || /[?&]tv=1\b/.test(location.search);
 if (TV) document.documentElement.classList.add('tv');
-const APP_VERSION = '202611020300';
+const APP_VERSION = '202611020400';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // the six checks pass on the panel
 const PORT_COLOR = { p1: 0, p2: 1, p3: 2, p0: 3 };                    // a colour stays with its port: pulling one out never repaints another
 const colorOf = pid => MEAT_COLORS[pid in PORT_COLOR ? PORT_COLOR[pid] : 3];
@@ -42,7 +42,6 @@ const S = {
   session: null, pit: null, plans: [],
   cook: null, readings: [], events: [],   // the live cook
   last: null,              // the newest reading
-  idle: null,              // no cook: the last session { cook, readings, events }, so the graph stays on screen
   history: [], histData: {},              // past cooks; id -> { readings, events }
   orders: [],              // his orders this session: { id, action, value, at, status }
   tab: 'now', sub: null, hidden: {},      // hidden: legend toggles
@@ -228,13 +227,12 @@ function marksOf(events, cook) {
   }
   return m;
 }
-// With no cook the screen is the same one: the newest reading on the tiles, the last session's graph under them.
+// With no cook: the smoker now, the newest reading on the tiles, nothing of the last cook (History keeps that).
 function idleCook() {
-  const c = S.idle ? S.idle.cook : null, t = S.last ? S.last.at : S.now();
-  return Object.assign({ id: 'idle', plan: { name: 'Cook', probes: [], tracks: { pit: [] } }, probes: {}, names: {}, startedAt: t, endedAt: t }, c || {},
-    { idle: true, status: 'idle', phase: 'idle', tracks: {}, timers: [], marks: [], alarms: {}, pending: null, failed: null, phaseAt: null, resting: [], rested: {} });
+  const t = S.last ? S.last.at : S.now();
+  return { id: 'idle', plan: { name: 'Cook', probes: [], tracks: { pit: [] } }, probes: {}, names: {}, startedAt: t, endedAt: t, idle: true, status: 'idle', phase: 'idle', tracks: {}, timers: [], marks: [], alarms: {}, pending: null, failed: null, phaseAt: null, resting: [], rested: {} };
 }
-// newest: the reading the tiles show, when it isn't the last of these readings (no cook: the graph is the last session's).
+// newest: the reading the tiles show, when it isn't the last of these readings (no cook: there are none, only the pit now).
 function buildView(cook, readings, events, now, newest) {
   const plan = cook.plan || { name: 'Cook', probes: [], tracks: { pit: [] } };
   const last = newest || (readings.length ? readings[readings.length - 1] : null);
@@ -287,7 +285,7 @@ function buildView(cook, readings, events, now, newest) {
 }
 // The readings behind a view: the live cook's (up to now) on the Now tab, a past cook's whole set elsewhere.
 function readingsOf(v) {
-  if (v.cook.idle) return S.idle ? S.idle.readings : [];
+  if (v.cook.idle) return [];
   const live = S.cook && S.cook.id === v.cook.id && S.tab === 'now';
   return live ? S.readings : (S.histData[v.cook.id] || {}).readings || (S.cook && S.cook.id === v.cook.id ? S.readings : []);
 }

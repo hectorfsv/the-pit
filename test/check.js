@@ -74,8 +74,8 @@ const SCENARIOS = [
     if (!/smoker off/.test(await p.evaluate(text, '.pit .heat') || '')) f.push('the Pit tile does not say the smoker is off');
     if ((await p.evaluate(count, '.meat')) !== 1) f.push('the plugged thermometer has no tile');
     if (!/Probe 1|Meat/i.test(await p.evaluate(text, '.meat .role') || '')) f.push('the tile has no name');
-    if ((await p.evaluate(painted, '#chart canvas')) < 400) f.push('the last graph is not on screen');
-    if (!/Your last session/.test(await p.evaluate(text, '.gwhen') || '')) f.push('the graph does not say it is the last session');
+    if (await p.evaluate(count, '#chart')) f.push('a graph on a new screen: nothing of the last cook belongs here');
+    if (await p.evaluate(() => /last session|Lately|Full graph/.test(document.querySelector('#main').textContent))) f.push('last cook info on a new screen');
     if (await p.evaluate(count, '.phase')) f.push('a plan header with no plan');
     if (await p.evaluate(count, '.ask')) f.push('an old ask is back on screen');
     if ((await p.evaluate(count, '#actions .btn')) !== 3) f.push('the bar is not Read now, Set pit, Power');
@@ -144,7 +144,7 @@ const SCENARIOS = [
   { name: 'tv-cook', before: noBar, url: 'index.html?demo=brisket&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },
   { name: 'tv-ribs', before: noBar, url: 'index.html?demo=ribs-chicken&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },
   { name: 'tv-open', before: noBar, url: 'index.html?demo=open&plug=3&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },
-  { name: 'tv-idle', before: noBar, url: 'index.html?demo=empty&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.chart']) },
+  { name: 'tv-idle', before: noBar, url: 'index.html?demo=empty&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit']) },
   { name: 'full-chart', url: 'index.html?demo=brisket#now', vps: ['phone-956', 'phone-land', 'tablet'], before: async p => { await p.click('[data-act=expand]'); await p.waitForSelector('.full-chart canvas'); await p.waitForTimeout(200); }, check: async p => { const f = []; const px = await p.evaluate(painted, '.full-chart canvas'); if (px < 800) f.push(`the full graph has ${px} lit samples`); const h = await p.evaluate(vis, '.full-chart .chart'); if (h && h.bottom > h.vh + 1) f.push(`the full graph runs ${Math.round(h.bottom - h.vh)}px past the bottom of the screen`); const hint = await p.evaluate(vis, '.full-chart .hint'); if (hint && hint.bottom > hint.vh + 1) f.push('the hint line is off screen'); return f; } },
   { name: 'editor', url: 'index.html?demo=brisket#plans/demo-monclova-low-n-slow', vps: ['phone-956', 'desktop'], before: async p => { await p.click('[data-act=edit-plan]'); await p.waitForSelector('.overlay.in .editor'); }, check: async p => { const f = []; if ((await p.evaluate(count, '.estep')) < 5) f.push('the editor does not show the five pit steps'); if (!(await p.evaluate(count, '#plan-errs.ok'))) f.push(`the engine does not accept the saved plan as is: ${await p.evaluate(text, '#plan-errs')}`); return f; } },
 ];
