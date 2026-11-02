@@ -32,7 +32,7 @@ const open = async (browser, url) => {
     }
     for (const want of ['tile', 'expand', 'points', 'next', 'pause', 'done', 'now', 'plans', 'history', 'alerts']) ok(seen.includes(want), `the arrows reach ${want}: ${seen.join(' ')}`);
     ok(!hidden.length, `the ring is never under the bar: ${hidden.join(' ')}`);
-    const spots = await page.evaluate(() => [...document.querySelectorAll('.now .steps,.now .log,.now .sensors')].every(e => e.tabIndex === 0));
+    const spots = await page.evaluate(() => [...document.querySelectorAll('.now .steps ol,.now .log ul,.now .sensors')].every(e => e.tabIndex === 0));
     ok(spots, 'the sections with nothing to press still take the ring');
     await page.keyboard.press('Shift+Tab'); const back = await here(page); ok(!back.body, 'Up walks back');
     ok(!errors.length, 'no page errors: ' + errors.join(' | ')); await ctx.close();
@@ -105,6 +105,8 @@ const open = async (browser, url) => {
   { // the phone never sees any of it
     const { ctx, page } = await open(browser, 'index.html?demo=brisket#now');
     ok(await page.evaluate(() => !document.documentElement.classList.contains('tv') && document.activeElement === document.body), 'without a stick: no tv class, no ring');
+    ok(await page.evaluate(() => /^[A-Z][a-z]{2} \d+, /.test(fmtStamp(S.now() - 26 * 3600e3)) && !/,/.test(fmtStamp(S.now()))), 'an old read carries its day, today only the clock');
+    ok(await page.evaluate(() => labelOf('m1') === 'Meater' && labelOf('p2') === 'Probe 2'), "the Meater's tile says Meater");
     await ctx.close();
   }
   await browser.close();

@@ -30,7 +30,7 @@ function renderAll() {
   renderStrip(v); renderActions(v);
   if (TV && !$('#sheet-root .overlay')) {
     // what the arrows can't otherwise reach: a section with nothing to press still takes the ring, so the page scrolls to it
-    $$('.now .steps,.now .log,.now .sensors').forEach((e, i) => { e.tabIndex = 0; e.dataset.spot = i; });
+    $$('.now .steps ol,.now .log ul,.now .sensors').forEach((e, i) => { e.tabIndex = 0; e.dataset.spot = i; });
     refocus(place);
     if (document.activeElement === document.body) { const el = $('#main .pit [data-act]') || $('#main button,#main a[href]') || $('.tabs a.on'); if (el) el.focus({ preventScroll: true }); }
   }
@@ -42,9 +42,9 @@ function renderStatus() {
   if (!last) { b.className = 'chip status'; b.innerHTML = '<span class="dot"></span>no reading yet'; return; }
   const fresh = now - last.at <= STALE_MINUTES * MINUTE;
   // With no cook nothing looks at the smoker on its own: an old reading is an old look, not an offline smoker.
-  if (!S.cook) { b.className = 'chip status ' + (fresh ? 'on' : ''); b.innerHTML = `<span class="dot"></span>${fresh ? 'read ' : 'last read '}<span data-age="${last.at}" data-mode="${fresh ? 'ago' : 'clock'}">${fresh ? fmtAgo(last.at, now) : fmtClock(last.at)}</span>`; return; }
+  if (!S.cook) { b.className = 'chip status ' + (fresh ? 'on' : ''); b.innerHTML = `<span class="dot"></span>${fresh ? 'read ' : 'last read '}<span data-age="${last.at}" data-mode="${fresh ? 'ago' : 'clock'}">${fresh ? fmtAgo(last.at, now) : fmtStamp(last.at)}</span>`; return; }
   b.className = 'chip status ' + (fresh ? 'on' : 'off');
-  b.innerHTML = `<span class="dot"></span>${fresh ? 'online, looked ' : 'offline since '}<span data-age="${last.at}" data-mode="${fresh ? 'ago' : 'clock'}">${fresh ? fmtAgo(last.at, now) : fmtClock(last.at)}</span>`;
+  b.innerHTML = `<span class="dot"></span>${fresh ? 'online, looked ' : 'offline since '}<span data-age="${last.at}" data-mode="${fresh ? 'ago' : 'clock'}">${fresh ? fmtAgo(last.at, now) : fmtStamp(last.at)}</span>`;
 }
 function renderDemoBar() {
   const bar = $('#demobar'); if (!bar) return;
@@ -110,7 +110,7 @@ function pitHTML(v) {
   } else if (v.phase === 'rest') line = `<div class="next">Cook done. The pit sits at <b>${c.restSet || 150}</b> for the hold.</div>`;
   else if (v.phase === 'hold') line = `<div class="next">Holding at <b>${c.restSet || 150}</b>. The meat is watched for 140.</div>`;
   const pending = c.pending ? `<div class="pending">Sent ${c.pending.set}°F, waiting for the smoker to take it</div>` : c.failed ? `<div class="pending">The smoker didn't take ${c.failed.set}°F</div>` : '';
-  const looked = v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : c.idle ? `last read ${fmtClock(v.sensors.lastHeard)}` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
+  const looked = v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : c.idle ? `last read ${fmtStamp(v.sensors.lastHeard)}` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
   const live = c.idle || (!c.endedAt && c.status !== 'done' && c.status !== 'stopped' && !(S.mode === 'demo' && c.status !== 'running'));
   const set = live ? `<button type="button" class="set-temp" data-act="set-pit">Set temp${p.set ? ` <b>${p.set}</b>` : ''}</button>` : p.set ? `<div class="set">set <b>${p.set}</b></div>` : '<div class="set dim">no setpoint</div>';
   const timers = (v.timers || []).filter(t => !t.told || v.now - t.at < 2 * HOUR).slice(-3).map(t => t.told ? `<span class="tm done">${esc(t.name)}: up at ${fmtClock(t.at)}</span>` : `<span class="tm"><b>${esc(t.name)}</b> ${fmtDur(t.left)} left, ${fmtClock(t.at)}</span>`).join('');
@@ -266,5 +266,5 @@ function afterRender(v) {
 }
 function tickAges() {
   const now = S.now();
-  for (const el of $$('[data-age]')) { const t = +el.dataset.age; el.textContent = el.dataset.mode === 'clock' ? fmtClock(t) : fmtAgo(t, S.mode === 'demo' ? now : Date.now()); }
+  for (const el of $$('[data-age]')) { const t = +el.dataset.age; el.textContent = el.dataset.mode === 'clock' ? fmtStamp(t) : fmtAgo(t, S.mode === 'demo' ? now : Date.now()); }
 }

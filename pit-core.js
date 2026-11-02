@@ -8,7 +8,7 @@ const ENGINE = typeof PitEngine !== 'undefined' ? PitEngine : null;
 // and Select as Enter; only html.tv and the lines behind TV change anything, so the phone never sees any of it.
 const TV = /\bAFT[A-Z0-9]/.test(navigator.userAgent) || /[?&]tv=1\b/.test(location.search);
 if (TV) document.documentElement.classList.add('tv');
-const APP_VERSION = '202611020230';
+const APP_VERSION = '202611020300';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // the six checks pass on the panel
 const PORT_COLOR = { p1: 0, p2: 1, p3: 2, p0: 3 };                    // a colour stays with its port: pulling one out never repaints another
 const colorOf = pid => MEAT_COLORS[pid in PORT_COLOR ? PORT_COLOR[pid] : 3];
@@ -24,6 +24,8 @@ const tms = x => typeof x === 'number' ? x : Date.parse(x);
 const capFirst = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
 const fmtClock = t => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(' ', ' ');
 const fmtHour = t => new Date(t).toLocaleTimeString('en-US', { hour: 'numeric' }).toLowerCase().replace(' ', '');
+// A clock alone reads as today: 12:23 am a day ago looked like 12 minutes ago on the TV (11-02). Anything older carries its day.
+const fmtStamp = t => { const d = new Date(t); return d.toDateString() === new Date(S.now ? S.now() : Date.now()).toDateString() ? fmtClock(t) : `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${fmtClock(t)}`; };
 const fmtDay = t => new Date(t).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 const fmtDur = minutes => { const m = Math.max(0, minutes), h = Math.floor(m / 60), mm = Math.round(m % 60); return h ? `${h}h ${String(mm).padStart(2, '0')}m` : `${mm}m`; };
 const fmtAgo = (t, now) => { const s = Math.max(0, (now - t) / 1000); if (s < 60) return `${rnd(s)} s ago`; if (s < 3600) return `${rnd(s / 60)} min ago`; return `${(s / 3600).toFixed(1)} h ago`; };
@@ -309,10 +311,10 @@ function csvOf(readings, roles) {
 // A wireless thermometer later: its driver lists its ids in pits.probes and writes them into readings.probes; anything
 // reading a number shows up here too.
 function portList() { return S.pit && Array.isArray(S.pit.probes) && S.pit.probes.length ? S.pit.probes.map(p => ({ id: p.id, label: p.label || p.id })) : [1, 2, 3].map(i => ({ id: 'p' + i, label: 'Probe ' + i })); }
-function labelOf(pid) { const p = portList().find(x => x.id === pid); return p ? p.label : String(pid).toUpperCase(); }
+function labelOf(pid) { const p = portList().find(x => x.id === pid); return p ? p.label : /^m\d+$/.test(pid) ? (pid === 'm1' ? 'Meater' : 'Meater ' + pid.slice(1)) : String(pid).toUpperCase(); }
 function probeSources() {
   const list = portList(), seen = S.cook ? (S.readings[S.readings.length - 1] || {}).probes : (S.last || {}).probes, names = (S.cook && S.cook.names) || {};
-  for (const id of Object.keys(seen || {})) if (seen[id] != null && !list.some(p => p.id === id)) list.push({ id, label: id.toUpperCase() });
+  for (const id of Object.keys(seen || {})) if (seen[id] != null && !list.some(p => p.id === id)) list.push({ id, label: labelOf(id) });
   return list.map(p => names[p.id] ? { id: p.id, label: names[p.id] } : p);
 }
 const slugRole = name => String(name || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^[_0-9]+|_+$/g, '');
