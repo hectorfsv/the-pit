@@ -471,6 +471,29 @@ a{color:inherit;text-decoration:none}
   .btn.hold.arming .fill{transition:transform 1.1s linear}
 }
 
+/* ---- the TV: the stick inside Hubs, 1443x812 from across the room, a remote and no touch. One screen: the Pit and its
+   thermometers on the left, the graph down to the bars, both bars on one line. Nothing here reaches a phone. ---- */
+html.tv{--gut:28px;scroll-padding:12px 0 96px}
+.tv :focus{outline:4px solid var(--ember-hot);outline-offset:3px}
+.tv .top,.tv .main,.tv .strip,.tv .demobar{max-width:none}
+.tv .top{padding-top:10px;padding-bottom:4px}
+.tv .main{padding-bottom:14px}
+.tv .bottom{display:grid;grid-template-columns:1fr auto;box-shadow:0 -1px 0 var(--rule)}
+.tv .strip{grid-column:1/-1;border-top:0}
+.tv .actions{max-width:none;width:100%;margin:0;border-top:0;padding:10px var(--gut)}
+.tv .actions .btn{font-size:18px;min-height:56px}
+.tv .tabs{grid-column:2;height:auto;margin:0;gap:4px;padding:6px var(--gut) 6px 0}
+.tv .actions[hidden]+.tabs{grid-column:1/-1;justify-content:space-around}
+.tv .tabs a{min-width:88px}
+.tv .now{grid-template-columns:minmax(440px,33%) 1fr;column-gap:22px}
+.tv .now .phase{margin-bottom:-4px}
+.tv .chart,.tv .graph .empty{height:calc(100vh - 262px)}
+.tv .pit .temp{font-size:150px}
+.tv .pit .heat{margin-top:10px}
+.tv .sheet{max-width:640px}
+.tv .sheet.full{max-width:none;width:calc(100% - 56px)}
+.tv .btn.armed{background:var(--ember-hot);color:var(--void)}
+
 input::placeholder,textarea::placeholder{color:var(--ink-faint);opacity:1}
 
 details.sub{border:1px solid var(--rule);border-radius:12px;padding:0 12px}

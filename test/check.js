@@ -15,6 +15,7 @@ const VPS = [
   { name: 'phone-956', w: 440, h: 956, mobile: true },     // his iPhone 18 Pro Max
   { name: 'tablet', w: 800, h: 1280, mobile: true },       // the desk tablet, portrait
   { name: 'desktop', w: 1280, h: 820, mobile: false },
+  { name: 'tv', w: 1443, h: 812, mobile: false },          // the Fire TV Stick inside Hubs: 1920x1080 at 1.33
   { name: 'phone-land', w: 956, h: 440, mobile: true },   // his phone on its side, for the full graph only
 ];
 const PROBE = () => {
@@ -33,6 +34,14 @@ const vis = sel => { const e = document.querySelector(sel); if (!e) return null;
 const count = sel => document.querySelectorAll(sel).length;
 const text = sel => { const e = document.querySelector(sel); return e ? e.textContent.trim() : null; };
 
+const noBar = p => p.evaluate(() => { const b = document.querySelector('#demobar'); if (b) b.style.display = 'none'; window.dispatchEvent(new Event('resize')); });   // a real cook has no sample bar
+// The TV has one screen to fill: everything named must sit above the bottom bar, with nothing to scroll for.
+const tvFits = async (p, sels) => {
+  const f = [], bar = await p.evaluate(vis, '.bottom'), html = await p.evaluate(() => document.documentElement.classList.contains('tv'));
+  if (!html) f.push('html.tv is not set');
+  for (const s of sels) { const v = await p.evaluate(vis, s); if (!v) f.push(`${s} is missing`); else if (v.bottom > bar.y + 1) f.push(`${s} ends at ${Math.round(v.bottom)}, under the bar at ${Math.round(bar.y)}`); }
+  return f;
+};
 // Each scenario: a URL, something to do first, then what must be on screen. The failures are sentences.
 const SCENARIOS = [
   { name: 'gate', url: 'index.html', check: async p => { const f = []; if (!(await p.evaluate(() => !document.querySelector('#gate').hidden))) f.push('the gate is not shown without a session'); if ((await p.evaluate(count, '#gate input')) !== 2) f.push('the gate does not have two fields'); return f; } },
@@ -132,6 +141,10 @@ const SCENARIOS = [
   { name: 'sheet-use-plan', url: 'index.html?demo=brisket#plans/demo-fiesta-style', vps: ['phone-956'], before: async p => { await p.click('[data-act=use-plan]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if ((await p.evaluate(count, 'select[data-role]')) !== 2) f.push('Fiesta needs two probe pickers on the running cook'); if (!/Use this plan now/.test(await p.evaluate(text, '#sheet-go') || '')) f.push('no hold button to use the plan'); return f; } },
   { name: 'sheet-points', url: 'index.html?demo=brisket#now', vps: ['phone-956'], before: async p => { await p.click('[data-act=points]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if (!(await p.evaluate(count, '#follow'))) f.push('no meat to follow'); await p.click('#add-point'); await p.fill('[data-p="0"][data-k=at]', '190'); await p.fill('[data-p="0"][data-k=set]', '300'); await p.waitForTimeout(150); if (await p.evaluate(() => document.querySelector('#sheet-go').disabled)) f.push(`a valid point leaves the button disabled: ${await p.evaluate(text, '#start-check')}`); return f; } },
   { name: 'sheet-timer', url: 'index.html?demo=brisket#now', vps: ['phone-956'], before: async p => { await p.click('[data-act=timer]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if (!(await p.evaluate(count, '#timer-min'))) f.push('no minutes field'); if ((await p.evaluate(count, '[data-presets=timer] button')) < 5) f.push('no timer presets'); return f; } },
+  { name: 'tv-cook', before: noBar, url: 'index.html?demo=brisket&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },
+  { name: 'tv-ribs', before: noBar, url: 'index.html?demo=ribs-chicken&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },
+  { name: 'tv-open', before: noBar, url: 'index.html?demo=open&plug=3&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },
+  { name: 'tv-idle', before: noBar, url: 'index.html?demo=empty&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.chart']) },
   { name: 'full-chart', url: 'index.html?demo=brisket#now', vps: ['phone-956', 'phone-land', 'tablet'], before: async p => { await p.click('[data-act=expand]'); await p.waitForSelector('.full-chart canvas'); await p.waitForTimeout(200); }, check: async p => { const f = []; const px = await p.evaluate(painted, '.full-chart canvas'); if (px < 800) f.push(`the full graph has ${px} lit samples`); const h = await p.evaluate(vis, '.full-chart .chart'); if (h && h.bottom > h.vh + 1) f.push(`the full graph runs ${Math.round(h.bottom - h.vh)}px past the bottom of the screen`); const hint = await p.evaluate(vis, '.full-chart .hint'); if (hint && hint.bottom > hint.vh + 1) f.push('the hint line is off screen'); return f; } },
   { name: 'editor', url: 'index.html?demo=brisket#plans/demo-monclova-low-n-slow', vps: ['phone-956', 'desktop'], before: async p => { await p.click('[data-act=edit-plan]'); await p.waitForSelector('.overlay.in .editor'); }, check: async p => { const f = []; if ((await p.evaluate(count, '.estep')) < 5) f.push('the editor does not show the five pit steps'); if (!(await p.evaluate(count, '#plan-errs.ok'))) f.push(`the engine does not accept the saved plan as is: ${await p.evaluate(text, '#plan-errs')}`); return f; } },
 ];

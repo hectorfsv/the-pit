@@ -20,21 +20,43 @@ function toast(text, kind, ttl) {
 }
 
 // ---- sheets ---------------------------------------------------------------------------------------------------
+// On a TV the sheet owns the remote: the arrows walk inside it, Back closes it (Hubs goes back in history first) and his
+// place on the screen comes back after it. A field gets no focus by itself: that would raise the keyboard unasked.
+const TVS = { open: false, popping: false, from: null };
+const sheetStops = sheet => $$('button,a[href],select,input,textarea,summary,[tabindex]', sheet).filter(e => !e.disabled && e.offsetParent !== null);
+function tvSheet(sheet) {
+  if (!TVS.open) { TVS.open = true; TVS.from = focusKey(); history.pushState({ sheet: 1 }, ''); }
+  const first = sheetStops(sheet).find(e => !/^(INPUT|TEXTAREA)$/.test(e.tagName)); if (first) first.focus();
+}
+function tvWalk(e, sheet) {
+  const all = sheetStops(sheet), i = all.indexOf(document.activeElement); e.preventDefault();
+  if (all.length) all[(i + (e.shiftKey ? -1 : 1) + all.length) % all.length].focus();
+}
+function tvSheetClosed() { if (!TVS.open) return; TVS.open = false; TVS.popping = true; history.back(); }
+function tvPopped() { TVS.popping = false; if (TVS.open) { TVS.open = false; closeSheet(true); } const from = TVS.from; TVS.from = null; refocus(from); }
 function openSheet(o) {
-  closeSheet();
+  closeSheet(true);
   const ov = document.createElement('div'); ov.className = 'overlay';
   ov.innerHTML = `<div class="sheet${o.full ? ' full' : ''}" role="dialog" aria-modal="true" aria-label="${esc(o.title || '')}"><div class="grab"></div>${o.title ? `<h2>${esc(o.title)}</h2>` : ''}${o.sub ? `<p class="sub">${o.sub}</p>` : ''}<div class="body">${o.body || ''}</div><div class="foot">${o.foot || ''}</div></div>`;
   ov.addEventListener('click', e => { if (e.target === ov) closeSheet(); });
   $('#sheet-root').appendChild(ov); requestAnimationFrame(() => ov.classList.add('in'));
-  const esc_ = e => { if (e.key === 'Escape') closeSheet(); }; document.addEventListener('keydown', esc_); ov._esc = esc_;
   const sheet = ov.querySelector('.sheet');
+  const esc_ = e => { if (e.key === 'Escape') closeSheet(); else if (TV && e.key === 'Tab') tvWalk(e, sheet); }; document.addEventListener('keydown', esc_); ov._esc = esc_;
   if (o.onOpen) o.onOpen(sheet);
+  if (TV) tvSheet(sheet);
   return sheet;
 }
-function closeSheet() { const ov = $('#sheet-root .overlay'); if (!ov) return; document.removeEventListener('keydown', ov._esc); ov.classList.remove('in'); setTimeout(() => ov.remove(), 200); }
+function closeSheet(swap) { const ov = $('#sheet-root .overlay'); if (!ov) return; document.removeEventListener('keydown', ov._esc); ov.classList.remove('in'); setTimeout(() => ov.remove(), 200); if (TV && swap !== true) tvSheetClosed(); }
 // Hold 1.1 s to fire: the bar fills (transform only); let go early and nothing happens.
 function armHold(btn, fn) {
   if (!btn || btn._armed) return; btn._armed = true;
+  // A remote has no hold: the tablet's Select is one press. On the TV Select arms it and a second Select inside 4 s sends.
+  if (TV) {
+    const lbl = btn.querySelector('.lbl') || btn; let armed = null, word = '';
+    const disarm = () => { if (!armed) return; clearTimeout(armed); armed = null; lbl.textContent = word; btn.classList.remove('armed'); };
+    btn.addEventListener('keydown', e => { if (e.key !== 'Enter' && e.key !== ' ') return; e.preventDefault(); if (btn.disabled) return; if (armed) { disarm(); fn(); } else { word = lbl.textContent; armed = setTimeout(disarm, 4000); lbl.textContent = 'Press again to send'; btn.classList.add('armed'); } });
+    btn.addEventListener('blur', disarm); btn.addEventListener('click', e => e.preventDefault()); return;
+  }
   btn.classList.add('hold'); if (!btn.querySelector('.fill')) { const f = document.createElement('span'); f.className = 'fill'; btn.prepend(f); }
   let timer = null;
   const start = e => { if (btn.disabled || timer) return; if (e.type === 'pointerdown') e.preventDefault(); btn.classList.add('arming'); timer = setTimeout(() => { timer = null; btn.classList.remove('arming'); btn.classList.add('fired'); setTimeout(() => btn.classList.remove('fired'), 500); fn(); }, 1100); };
@@ -44,7 +66,7 @@ function armHold(btn, fn) {
   btn.addEventListener('click', e => e.preventDefault()); btn.addEventListener('contextmenu', e => e.preventDefault());
   btn.style.webkitUserSelect = 'none'; btn.style.webkitTouchCallout = 'none'; btn.style.userSelect = 'none';
 }
-const holdFoot = (label, cls) => `<button type="button" class="btn ${cls || 'primary'}" id="sheet-go"><span class="lbl">${esc(label)}</span></button><div class="hold-hint">hold to confirm</div>`;
+const holdFoot = (label, cls) => `<button type="button" class="btn ${cls || 'primary'}" id="sheet-go"><span class="lbl">${esc(label)}</span></button><div class="hold-hint">${TV ? 'press twice to send' : 'hold to confirm'}</div>`;
 function confirmSheet(o) {
   openSheet({ title: o.title, sub: o.sub, body: o.body || '', foot: holdFoot(o.label, o.cls) + (o.cancel === false ? '' : '<button type="button" class="btn quiet" id="sheet-no">Not now</button>'),
     onOpen: sh => { const go = $('#sheet-go', sh); if (o.disabled) go.disabled = true; armHold(go, () => { closeSheet(); o.onFire(); }); const no = $('#sheet-no', sh); if (no) no.addEventListener('click', closeSheet); if (o.onOpen) o.onOpen(sh); } });

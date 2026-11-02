@@ -4,7 +4,10 @@
 const TABS = ['now', 'plans', 'history', 'alerts'];
 
 // ---- routes ---------------------------------------------------------------------------------------------------
-function go(tab, sub) { const h = '#' + tab + (sub ? '/' + encodeURIComponent(sub) : ''); if (location.hash === h) onHash(); else location.hash = h; }
+function go(tab, sub) {
+  if (TV && (TVS.open || TVS.popping)) { if (TVS.open) closeSheet(); setTimeout(() => go(tab, sub), 40); return; }
+  const h = '#' + tab + (sub ? '/' + encodeURIComponent(sub) : ''); if (location.hash === h) onHash(); else location.hash = h;
+}
 function readHash() { const h = (location.hash || '#now').slice(1).split('/'); S.tab = TABS.includes(h[0]) ? h[0] : 'now'; S.sub = h[1] ? decodeURIComponent(h.slice(1).join('/')) : null; }
 function onHash() {
   readHash(); closeSheet(); window.scrollTo(0, 0); renderAll();
@@ -160,6 +163,10 @@ function boot() {
   $('#strip').addEventListener('click', () => go('now'));
   window.addEventListener('hashchange', onHash);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode === 'live') refreshLive(false).then(lookOnOpen); });
+  if (TV) {
+    window.addEventListener('popstate', tvPopped);
+    document.addEventListener('keydown', e => { if (e.repeat && e.key === 'Enter') e.preventDefault(); }, true);   // a Select held a moment long presses once
+  }
   $('#main').addEventListener('keydown', e => { const t = e.target; if ((e.key === 'Enter' || e.key === ' ') && t.dataset && t.dataset.act === 'tile') { e.preventDefault(); t.click(); } });
   let wasWide = wideScreen();
   window.addEventListener('resize', () => { const w = wideScreen(); if (w !== wasWide) { wasWide = w; renderAll(); } });

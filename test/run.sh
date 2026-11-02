@@ -21,4 +21,7 @@ PY
 PORT=$((8700 + RANDOM % 200))
 python3 -m http.server "$PORT" --bind 127.0.0.1 >/dev/null 2>&1 & SRV=$!
 for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null "http://127.0.0.1:$PORT/index.html" && break; sleep 0.3; done
-node test/check.js --base "http://127.0.0.1:$PORT/" ${1:+--only "$1"}
+node test/check.js --base "http://127.0.0.1:$PORT/" ${1:+--only "$1"}; RC=$?
+# the remote, in Chromium like the stick: only on a whole run, or by name
+if [ -z "${1:-}" ] || [ "${1:-}" = tv-keys ]; then node test/tv-keys.js --base "http://127.0.0.1:$PORT/" || RC=1; fi
+exit $RC

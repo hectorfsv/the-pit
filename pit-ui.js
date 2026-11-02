@@ -5,8 +5,18 @@
 const PHASE_WORD = { cook: 'Cooking', rest: 'Resting', hold: 'Holding', paused: 'Paused' };
 const KIND_WORD = { step: 'step', ask: 'asks you', alert: 'alert', clear: 'cleared', order: 'order', note: 'note', error: 'error' };
 
+// A new reading rebuilds the screen. On a remote his place has to survive that: the ring stays where he left it.
+function focusKey() {
+  const a = document.activeElement; if (!a || a === document.body || !a.dataset) return null;
+  const at = a.closest('.bottom') ? '.bottom ' : '#main ';
+  if (a.dataset.tab) return `${at}[data-tab="${a.dataset.tab}"]`;
+  if (a.dataset.act) return `${at}[data-act="${a.dataset.act}"]${a.dataset.v ? `[data-v="${a.dataset.v}"]` : ''}`;
+  return a.dataset.spot ? `${at}[data-spot="${a.dataset.spot}"]` : null;
+}
+function refocus(key) { const el = key && document.querySelector(key); if (el) el.focus({ preventScroll: true }); }
 function renderAll() {
   if (!S.mode) return;
+  const place = TV ? focusKey() : null;
   renderStatus(); renderDemoBar();
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === S.tab));
   const idle = !S.cook && S.tab === 'now' ? idleCook() : null, was = S.idle || { readings: [], events: [] };
@@ -18,6 +28,12 @@ function renderAll() {
   else main.innerHTML = alertsHTML();
   afterRender(v);
   renderStrip(v); renderActions(v);
+  if (TV && !$('#sheet-root .overlay')) {
+    // what the arrows can't otherwise reach: a section with nothing to press still takes the ring, so the page scrolls to it
+    $$('.now .steps,.now .log,.now .sensors').forEach((e, i) => { e.tabIndex = 0; e.dataset.spot = i; });
+    refocus(place);
+    if (document.activeElement === document.body) { const el = $('#main .pit [data-act]') || $('#main button,#main a[href]') || $('.tabs a.on'); if (el) el.focus({ preventScroll: true }); }
+  }
 }
 function renderStatus() {
   const b = $('#status'); if (!b) return;
