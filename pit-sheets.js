@@ -100,7 +100,7 @@ function openSetPit() {
   let val = (last && last.set) || 225; const bad = refusals(last).filter(r => !/off\./.test(r));
   const presets = [150, 200, 225, 250, 275, 300, 325];
   const paint = sh => { $('.stepper .val', sh).innerHTML = `${val}<sup>°F</sup>`; $$('.presets button', sh).forEach(b => b.classList.toggle('on', +b.dataset.v === val)); $('#sheet-go .lbl', sh).textContent = `Set the pit to ${val}°F`; };
-  confirmSheet({ title: 'Set the pit', sub: `The smoker goes from ${range.min} to ${range.max}°F. Your setpoint stands until the plan's next step sets its own.`, label: `Set the pit to ${val}°F`, disabled: bad.length > 0,
+  confirmSheet({ title: 'Set temp', sub: `The smoker goes from ${range.min} to ${range.max}°F. Your setpoint stands until the plan's next step sets its own.`, label: `Set the pit to ${val}°F`, disabled: bad.length > 0,
     body: `<div class="stepper"><button type="button" data-d="-5" aria-label="5 less">−</button><div class="val"></div><button type="button" data-d="5" aria-label="5 more">+</button></div><div class="presets">${presets.map(p => `<button type="button" data-v="${p}">${p}</button>`).join('')}</div>${bad.length ? `<p class="refuse">${esc(bad.join(' '))}</p>` : ''}`,
     onOpen: sh => { paint(sh); $$('.stepper button', sh).forEach(b => b.addEventListener('click', () => { val = Math.min(range.max, Math.max(range.min, val + +b.dataset.d)); paint(sh); })); $$('.presets button', sh).forEach(b => b.addEventListener('click', () => { val = +b.dataset.v; paint(sh); })); },
     onFire: () => placeOrder('set', val) });

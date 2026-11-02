@@ -77,7 +77,6 @@ function meatHTML(r, v) {
 function pitHTML(v) {
   const p = v.pit, c = v.cook;
   const temp = p.temp == null ? '<div class="temp none">no reading</div>' : `<div class="temp">${rnd(p.temp)}<sup>°F</sup></div>`;
-  const set = p.set ? `<div class="set">set <b>${p.set}</b></div>` : '<div class="set dim">no setpoint</div>';
   const heat = `<div class="heat${p.heating ? ' on' : ''}">${p.heating ? 'heating' : 'holding'}</div>`;
   let line = '';
   if ((v.phase === 'cook' || v.phase === 'paused') && p.step) {
@@ -88,6 +87,7 @@ function pitHTML(v) {
   const pending = c.pending ? `<div class="pending">Sent ${c.pending.set}°F, waiting for the smoker to take it</div>` : c.failed ? `<div class="pending">The smoker didn't take ${c.failed.set}°F</div>` : '';
   const looked = v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
   const live = !c.endedAt && c.status !== 'done' && c.status !== 'stopped' && !(S.mode === 'demo' && c.status !== 'running');
+  const set = live ? `<button type="button" class="set-temp" data-act="set-pit">Set temp${p.set ? ` <b>${p.set}</b>` : ''}</button>` : p.set ? `<div class="set">set <b>${p.set}</b></div>` : '<div class="set dim">no setpoint</div>';
   const timers = (v.timers || []).filter(t => !t.told || v.now - t.at < 2 * HOUR).slice(-3).map(t => t.told ? `<span class="tm done">${esc(t.name)}: up at ${fmtClock(t.at)}</span>` : `<span class="tm"><b>${esc(t.name)}</b> ${fmtDur(t.left)} left, ${fmtClock(t.at)}</span>`).join('');
   const tools = live ? `<div class="pit-tools">${timers}<button type="button" class="mini" data-act="timer">Set timer</button></div>` : timers ? `<div class="pit-tools">${timers}</div>` : '';
   return `<article class="pit"><div class="head"><div class="role">Pit</div><div class="stepname">${looked}</div></div><div class="big">${temp}<div class="right">${set}${heat}</div></div>${line}${pending}${tools}</article>`;
