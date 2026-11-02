@@ -58,9 +58,58 @@ const SCENARIOS = [
   { name: 'now-ask', url: 'index.html?demo=ribs&at=262#now', vps: ['phone-956', 'tablet'], check: async p => { const f = []; if ((await p.evaluate(count, '.ask .btn')) !== 2) f.push('the ribs ask (Wrapped / Keep going) is not on screen at minute 262'); if ((await p.evaluate(count, '.meat')) !== 2) f.push('ribs and chicken do not both have a card'); if ((await p.evaluate(count, '.legend button')) !== 4) f.push('the legend does not show both meats'); return f; } },
   { name: 'now-rest', url: 'index.html?demo=brisket&at=880#now', vps: ['phone-956'], check: async p => { const f = []; if (!/^Resting/.test(await p.evaluate(text, '.phase h2') || '')) f.push('the phase is not Resting at minute 880'); if (!/End cook/.test(await p.evaluate(text, '#actions .btn.primary') || '')) f.push('the primary action in the rest is not End cook'); if (!/resting/.test(await p.evaluate(text, '.meat .line') || '')) f.push('the meat card does not say resting'); return f; } },
   { name: 'now-hold', url: 'index.html?demo=brisket&at=1050#now', vps: ['phone-700'], check: async p => { const f = []; if (!/^Holding/.test(await p.evaluate(text, '.phase h2') || '')) f.push('the phase is not Holding at minute 1050'); if ((await p.evaluate(count, '.steps li.cur')) !== 1) f.push('the hold is not the current step'); return f; } },
-  { name: 'now-empty', url: 'index.html?demo=empty#now', vps: ['phone-700', 'phone-956'], check: async p => { const f = []; if (!/No cook running/.test(await p.evaluate(text, '.empty-cook h2') || '')) f.push('the empty state is missing'); if (!(await p.evaluate(count, '[data-act=start-cook]'))) f.push('no Start a cook button'); if (await p.evaluate(() => !document.querySelector('#actions').hidden)) f.push('the action bar shows with no cook'); return f; } },
+  // The one screen (11-01): always Pit, thermometers, graph, the rest; a plan is an extra on it.
+  { name: 'now-empty', url: 'index.html?demo=empty#now', vps: ['phone-700', 'phone-956', 'tablet', 'desktop'], check: async p => { const f = [];
+    if (await p.evaluate(() => /No cook running|Start a cook/.test(document.body.textContent))) f.push('the old empty screen or Start a cook is back');
+    if (!/^\d{2,3}°F$/.test(((await p.evaluate(text, '.pit .temp')) || '').replace(/\s/g, ''))) f.push('no pit number with the smoker off');
+    if (!/smoker off/.test(await p.evaluate(text, '.pit .heat') || '')) f.push('the Pit tile does not say the smoker is off');
+    if ((await p.evaluate(count, '.meat')) !== 1) f.push('the plugged thermometer has no tile');
+    if (!/Probe 1|Meat/i.test(await p.evaluate(text, '.meat .role') || '')) f.push('the tile has no name');
+    if ((await p.evaluate(painted, '#chart canvas')) < 400) f.push('the last graph is not on screen');
+    if (!/Your last session/.test(await p.evaluate(text, '.gwhen') || '')) f.push('the graph does not say it is the last session');
+    if (await p.evaluate(count, '.phase')) f.push('a plan header with no plan');
+    if (await p.evaluate(count, '.ask')) f.push('an old ask is back on screen');
+    if ((await p.evaluate(count, '#actions .btn')) !== 3) f.push('the bar is not Read now, Set pit, Power');
+    if (!/Power on/.test(await p.evaluate(text, '#actions') || '')) f.push('the bar does not offer Power on with the smoker off');
+    if (!(await p.evaluate(count, '[data-act=go-plans]'))) f.push('no way to a plan');
+    const pc = await p.evaluate(vis, '.pit'), mc = await p.evaluate(vis, '.meat'); if (!pc || !mc || pc.y > mc.y) f.push('the Pit is not first');
+    return f; } },
+  { name: 'now-open', url: 'index.html?demo=open#now', vps: ['phone-700', 'phone-956', 'tablet', 'desktop'], check: async p => { const f = [];
+    if (await p.evaluate(count, '.phase')) f.push('a plan header on a session with no plan');
+    if (!/On since/.test(await p.evaluate(text, '.pit .next') || '')) f.push('no session clock on the Pit tile');
+    if ((await p.evaluate(count, '.meat')) !== 2) f.push('two thermometers read, ' + await p.evaluate(count, '.meat') + ' tiles');
+    if ((await p.evaluate(count, '.legend button')) !== 5) f.push('the pulled thermometer lost its line on the graph');
+    const [a, b] = await p.evaluate(() => [...document.querySelectorAll('.meat')].map(e => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width }; }));
+    if (!a || !b || Math.abs(a.y - b.y) > 1 || b.x < a.x + a.w) f.push('the tiles do not sit side by side');
+    if (!/no target/.test(await p.evaluate(text, '.meat') || '')) f.push('a thermometer with no plan should say so');
+    if ((await p.evaluate(count, '#actions .btn')) !== 2) f.push('the bar is not Set pit and Cook done');
+    if ((await p.evaluate(count, '.steps li'))) f.push('plan steps with no plan');
+    if (!(await p.evaluate(count, '[data-act=points]'))) f.push('no Cooking points on a session');
+    if ((await p.evaluate(painted, '#chart canvas')) < 400) f.push('no graph');
+    return f; } },
+  { name: 'now-plug', url: 'index.html?demo=brisket&plug=2#now', vps: ['phone-700', 'phone-956', 'tablet', 'desktop'], check: async p => { const f = [];
+    if ((await p.evaluate(count, '.meat')) !== 3) f.push('three thermometers, not three tiles');
+    if (!(await p.evaluate(count, '.phase'))) f.push('the plan header should stay while a plan runs');
+    const names = await p.evaluate(() => [...document.querySelectorAll('.meat .role')].map(e => e.textContent));
+    if (!/meat/i.test(names[0] || '')) f.push('the thermometer the plan follows is not first: ' + names);
+    if (!/at this pace|until|Probe/.test(await p.evaluate(text, '.tiles') || '')) f.push('the tiles lost their lines');
+    if ((await p.evaluate(count, '#actions .btn')) !== 4) f.push('the plan bar changed');
+    return f; } },
+  { name: 'sheet-tile', url: 'index.html?demo=brisket&plug=1#now', vps: ['phone-700', 'phone-956', 'desktop'], before: async p => { await p.click('.meat[data-pid=p2]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = [];
+    if (!/Probe 2/.test(await p.evaluate(text, '.overlay.in .sheet h2') || '')) f.push('the sheet is not about Probe 2');
+    if (!(await p.evaluate(count, '#th-name')) || !(await p.evaluate(count, '#th-at'))) f.push('no name or tell-me-at field');
+    const opt = await p.evaluate(() => [...document.querySelectorAll('#th-follow option')].map(o => o.text).join('|'));
+    if (!/no, it just shows/.test(opt) || !/the meat/.test(opt)) f.push('the plan\'s thermometer pick is missing: ' + opt);
+    await p.fill('#th-name', 'flat'); await p.fill('#th-at', '190'); await p.click('#sheet-go'); await p.waitForTimeout(300);
+    if (!/nothing is sent/.test(await p.evaluate(text, '#toasts') || '')) f.push('Save did not place an order');
+    return f; } },
+  { name: 'sheet-tile-plan', url: 'index.html?demo=brisket#now', vps: ['phone-956'], before: async p => { await p.click('.meat[data-pid=p0]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = [];
+    if (!(await p.evaluate(() => document.querySelector('#th-follow').disabled))) f.push('the thermometer a plan follows must not unbind from its own sheet');
+    if (!/tap the thermometer that should take over/.test(await p.evaluate(text, '.overlay.in .sheet') || '')) f.push('it does not say how to change it');
+    return f; } },
+  { name: 'set-idle', url: 'index.html?demo=empty#now', vps: ['phone-956'], before: async p => { await p.click('.pit .set-temp'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if (!/Set the pit to \d+°F/.test(await p.evaluate(text, '#sheet-go') || '')) f.push('Set temp does not work with the smoker off'); return f; } },
   { name: 'plans', url: 'index.html?demo=brisket#plans', check: async p => { const f = []; const n = await p.evaluate(count, '.plan-card'); if (n < 6) f.push(`${n} plan cards, expected the five plans and New plan`); if (await p.evaluate(() => document.querySelector('#strip').hidden)) f.push('the live strip is missing on the Plans tab during a cook'); return f; } },
-  { name: 'plan-view', url: 'index.html?demo=brisket#plans/demo-monclova-low-n-slow', vps: ['phone-956', 'desktop'], check: async p => { const f = []; if ((await p.evaluate(count, '.track')) < 1) f.push('no tracks on the plan view'); if ((await p.evaluate(count, '.plan-view .row .btn')) !== 5) f.push('the plan view does not offer the five actions during a cook'); return f; } },
+  { name: 'plan-view', url: 'index.html?demo=brisket#plans/demo-monclova-low-n-slow', vps: ['phone-956', 'desktop'], check: async p => { const f = []; if ((await p.evaluate(count, '.track')) < 1) f.push('no tracks on the plan view'); if ((await p.evaluate(count, '.plan-view .row .btn')) !== 4) f.push('the plan view does not offer the four actions during a cook'); return f; } },
   { name: 'history', url: 'index.html?demo=brisket#history', check: async p => { const f = []; if ((await p.evaluate(count, '.cook-card')) !== 2) f.push('history does not list the two sample cooks'); await p.waitForTimeout(300); const px = await p.evaluate(painted, '.cook-card canvas'); if (px < 20) f.push(`a cook card thumbnail has ${px} lit samples`); return f; } },
   { name: 'past', url: 'index.html?demo=brisket#history/demo-brisket', vps: ['phone-956', 'tablet'], check: async p => { const f = []; if ((await p.evaluate(count, '.miles tr')) < 6) f.push('the milestones table is short'); const px = await p.evaluate(painted, '#chart canvas'); if (px < 400) f.push(`the past cook graph has ${px} lit samples`); if ((await p.evaluate(count, '.rate-row button')) !== 5) f.push('no five stars'); if ((await p.evaluate(count, '.log li')) < 15) f.push('the past cook log is not the whole log'); return f; } },
   { name: 'alerts', url: 'index.html?demo=brisket#alerts', check: async p => { const f = []; if ((await p.evaluate(count, '.sw')) !== 14) f.push('not 14 switches'); if ((await p.evaluate(count, '.alerts .phone')) !== 1) f.push('no Phone alerts card at the top of the Alerts tab'); const lid = await p.evaluate(() => { const b = [...document.querySelectorAll('.tog')].find(x => x.dataset.v === 'lid'); return b && b.getAttribute('aria-checked'); }); if (lid !== 'false') f.push(`the lid switch reads ${lid}, not off`); return f; } },
@@ -78,18 +127,6 @@ const SCENARIOS = [
     if (!/Set the pit to \d+°F/.test(await p.evaluate(text, '#sheet-go') || '')) f.push('the sheet has no confirm with the temperature');
     return f; } },
   { name: 'sheet-set', url: 'index.html?demo=brisket#now', vps: ['phone-700', 'phone-956'], before: async p => { await p.click('#actions [data-act=set]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if (!/^\d+°F$/.test((await p.evaluate(text, '.stepper .val') || '').replace(/\s/g, ''))) f.push('the set sheet shows no setpoint'); if (!/Set the pit to \d+°F/.test(await p.evaluate(text, '#sheet-go') || '')) f.push('the hold button does not name the setpoint'); return f; } },
-  { name: 'sheet-newcook', url: 'index.html?demo=empty#now', vps: ['phone-700', 'phone-956', 'tablet'], before: async p => { await p.click('[data-act=start-cook]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = [];
-    if (!(await p.evaluate(count, '.nowbox .big'))) f.push('the sheet does not show the smoker now');
-    if (!/225/.test(await p.evaluate(text, '.stepper .val') || '')) f.push('the set temp does not start at 225');
-    if ((await p.evaluate(count, '.mrow')) !== 3) f.push('not one row per probe');
-    if (!(await p.evaluate(count, '[data-presets=timer] button'))) f.push('no timer presets');
-    if (!(await p.evaluate(count, '#add-point'))) f.push('no cooking points');
-    if ((await p.evaluate(count, '.radio-list'))) f.push('the plan list is back on the basic sheet');
-    await p.fill('[data-m="0"][data-k=name]', 'chicken'); await p.fill('[data-m="0"][data-k=target]', '165'); await p.click('#add-point'); await p.fill('[data-p="0"][data-k=at]', '150'); await p.fill('[data-p="0"][data-k=set]', '275');
-    await p.waitForTimeout(150);
-    const ok = await p.evaluate(text, '#start-check'); if (!/Ready: Cooking points/.test(ok || '')) f.push(`after a meat and a point the check says: ${ok}`);
-    if (await p.evaluate(() => document.querySelector('#sheet-go').disabled)) f.push('Start stays disabled with a valid cook');
-    return f; } },
   { name: 'sheet-start-plan', url: 'index.html?demo=empty#plans/demo-monclova-low-n-slow', vps: ['phone-956'], before: async p => { await p.click('[data-act=start-plan]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; const pick = await p.evaluate(() => { const s = document.querySelector('select[data-role=meat]'); return { v: s && s.value, opts: s ? [...s.options].map(o => o.text) : [] }; }); if (pick.v !== 'p1') f.push('the meat should start on Probe 1, the one reading, not ' + pick.v); if (pick.opts.join().includes('P0')) f.push('an empty port is back in the picker: ' + pick.opts); if (pick.opts.filter(o => /^Probe/.test(o)).length !== 3) f.push('not three probes: ' + pick.opts); return f; } },
   { name: 'sheet-start-plan-p2', url: 'index.html?demo=empty#plans/demo-monclova-low-n-slow', vps: ['phone-956'], before: async p => { await p.evaluate(() => { S.last.probes = { p0: null, p1: null, p2: 60, p3: null }; }); await p.click('[data-act=start-plan]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; const v = await p.evaluate(() => document.querySelector('select[data-role=meat]').value); if (v !== 'p2') f.push('the meat should start on the probe that reads, not ' + v); return f; } },
   { name: 'sheet-use-plan', url: 'index.html?demo=brisket#plans/demo-fiesta-style', vps: ['phone-956'], before: async p => { await p.click('[data-act=use-plan]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if ((await p.evaluate(count, 'select[data-role]')) !== 2) f.push('Fiesta needs two probe pickers on the running cook'); if (!/Use this plan now/.test(await p.evaluate(text, '#sheet-go') || '')) f.push('no hold button to use the plan'); return f; } },

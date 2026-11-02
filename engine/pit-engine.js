@@ -21,6 +21,8 @@ const RULES = {
   realertMinutes: 30,
   askAtHours: 36, closeAtHours: 48,
   resends: 1,
+  closeOffMinutes: 30, closeGoneMinutes: 60,   // a session that opened itself: off this long (a shutdown mid-cook must not split it), or not heard from
+  ambientWithin: 15,                           // a thermometer this close to the pit is reading air, not meat
 };
 
 // Every alert has a switch (Hector 10-28: "put them all but make it so i can activate them or deactivate them").
@@ -57,6 +59,7 @@ const mins = (a, b) => (ms(b) - ms(a)) / 60000;
 const r0 = v => Math.round(v);
 const copy = o => JSON.parse(JSON.stringify(o));
 const inRange = v => typeof v === 'number' && v >= RULES.probeMin && v <= RULES.probeMax;
+const capName = s => s.charAt(0).toUpperCase() + s.slice(1);
 const clock = iso => new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' });
 
 // ---- plans -----------------------------------------------------------------------------------------------
@@ -120,6 +123,20 @@ function series(readings, pid) {
     const offA = a && Math.abs(p.v - a.v) >= RULES.glitchJump, offB = b && Math.abs(p.v - b.v) >= RULES.glitchJump;
     return !(offA && (offB || !b));
   });
+}
+
+// The thermometers reading right now, in port order. They belong to the pit, not the plan: what's plugged in shows,
+// and a plan follows one (cook.probes: its meat -> the thermometer).
+const plugged = reading => Object.keys((reading && reading.probes) || {}).filter(id => inRange(reading.probes[id])).sort();
+const roleOf = (cook, pid) => Object.keys(cook.probes || {}).find(r => cook.probes[r] === pid) || null;
+function nameOf(cook, pid) {
+  const given = (cook.names || {})[pid], role = roleOf(cook, pid);
+  return given || (role ? role.replace(/_/g, ' ') : /^p\d+$/.test(pid) ? 'probe ' + pid.slice(1) : pid);
+}
+// Every thermometer in a tell: " (point 197, flat 177)". With one reading it's already in the words.
+function quoteAll(cook, reading) {
+  const ids = plugged(reading);
+  return ids.length < 2 ? '' : ` (${ids.map(id => `${nameOf(cook, id)} ${r0(reading.probes[id])}`).join(', ')})`;
 }
 
 // role -> its good temperature in the newest reading, or null (missing, unplugged, a glitch)
@@ -203,7 +220,7 @@ function enter(cook, role, idx, ctx) {
   cook.tracks[role] = { step: idx, since: ctx.now };
   const extra = { track: role, step: step.name || null };
   if (step.ask) extra.ask = step.ask;
-  if (step.tell) say(ctx.out, step.ask ? 'ask' : 'step', fill(step.tell, ctx), extra);
+  if (step.tell) say(ctx.out, step.ask ? 'ask' : 'step', fill(step.tell, ctx) + quoteAll(cook, ctx.reading), extra);
   else note(ctx.out, 'step', `${role}: ${step.name || 'step ' + (idx + 1)}.`, extra);
   if (role === 'pit' && typeof step.set === 'number') requestSet(cook, step.set, ctx, 'plan');
 }
@@ -233,12 +250,23 @@ function met(u, role, st, ctx) {
   return win.length >= 4 && Math.max.apply(null, win.map(p => p.v)) - base.v < RULES.stall.rise;
 }
 
+// Would this temperature already answer what the plan waits on from this meat?
+function pastLine(cook, role, temp) {
+  return Object.keys(cook.tracks).some(r => {
+    const st = cook.tracks[r], u = st.ended ? null : cook.plan.tracks[r][st.step].until;
+    return !!u && probeOf(u, r) === role && (('at_least' in u && temp >= u.at_least) || ('at_most' in u && temp <= u.at_most));
+  });
+}
+
 // ---- the three calls -------------------------------------------------------------------------------------
 
 // Start a cook. probes maps the plan's probe names to the smoker's probes ({ meat: 'p0' }); a meat track with no
 // probe is skipped (Fiesta with chicken only). The smoker must be on, in °F and heard from in the last 5 minutes.
 // Without a plan a cook just watches: the graph, the meats, the alerts; only he changes the smoker.
 const WATCH_PLAN = { name: 'Just watch', for: 'any cook you run yourself', max_pit: 325, probes: [], tracks: { pit: [{ name: 'Watching', tell: 'Watching the pit. Only you change the smoker.' }] } };
+// The same with no words: a session that opened itself because the smoker is on (auto). It never sends a command, closes
+// itself after the smoker has been off 30 minutes, and a plan joins whenever he wants one.
+const SESSION_PLAN = Object.assign({}, WATCH_PLAN, { tracks: { pit: [{ name: 'Watching' }] } });
 const PROBE_ID = /^[a-z][a-z0-9_]*$/;   // the smoker's p0–p3 today; a wireless thermometer's own ids tomorrow
 
 // "Tell me" lines on any plan: a probe line ({ name, probe, at } or { name, probe, down_to }) becomes a meat track of
@@ -282,8 +310,8 @@ function probeErrors(plan, probes) {
   return errors;
 }
 
-function startCook({ plan, probes, reading, now, id, meat, weightLb, alerts, tells }) {
-  const w = withTells(plan || WATCH_PLAN, probes, tells); plan = w.plan; probes = w.probes;
+function startCook({ plan, probes, reading, now, id, meat, weightLb, alerts, tells, auto }) {
+  const w = withTells(plan || (auto ? SESSION_PLAN : WATCH_PLAN), probes, tells); plan = w.plan; probes = w.probes;
   const errors = validatePlan(plan, reading && reading.range).concat(w.errors);
   if (!reading) errors.push("I can't read the smoker right now.");
   else {
@@ -299,6 +327,7 @@ function startCook({ plan, probes, reading, now, id, meat, weightLb, alerts, tel
     status: 'running', pausedFor: null, phase: 'cook', phaseAt: now, startedAt: now, endedAt: null, heartbeatAt: now,
     tracks: {}, lastSet: reading.set, setAt: now, pending: null, failed: null, alarms: {}, glitches: {}, readFails: 0,
     askedLong: false, restSet: null, resting: [], rested: {}, timers: timerRows(w.timers, now),
+    names: {}, marks: [], auto: !!auto, offSince: null,
   };
   const out = { orders: [], events: [] };
   const ctx = { cook, reading, now, out, on: switches(alerts), all: [reading], temps: tempsNow(cook, [reading], reading) };
@@ -327,13 +356,19 @@ function check({ cook: c0, reading, history, now, alerts }) {
   cook.readFails = 0;
   episode(ctx, 'unreachable', false, '', 'Reaching the smoker again.');
 
-  // 2. Old data is no data.
+  // 2. Old data is no data. A session that opened itself closes on its own: off 30 minutes, or an hour with no word.
   const stale = mins(reading.at, now) > RULES.staleMinutes;
+  cook.offSince = reading.power ? null : cook.offSince || now;
+  if (cook.auto && (cook.offSince ? mins(cook.offSince, now) >= RULES.closeOffMinutes : mins(reading.at, now) >= RULES.closeGoneMinutes)) {
+    cook.status = 'done'; cook.endedAt = now;
+    note(out, 'note', cook.offSince ? `The smoker stayed off ${RULES.closeOffMinutes} minutes: session closed.` : `No word from the smoker for ${RULES.closeGoneMinutes} minutes: session closed.`);
+    return finish();
+  }
   episode(ctx, 'offline', stale, `The smoker is offline: last heard at ${clock(reading.at)}. Nothing changes until it's back.`, 'The smoker is back online.');
   if (stale) return finish();
 
   // 3. Off means hands off.
-  episode(ctx, 'off', !reading.power, 'The smoker is off. End the cook?', 'The smoker is on again.', { ask: ['End the cook', 'Keep it open'] });
+  episode(ctx, 'off', !reading.power, cook.auto ? `The smoker is off. This session closes after ${RULES.closeOffMinutes} minutes off.` : 'The smoker is off. End the cook?', 'The smoker is on again.', cook.auto ? {} : { ask: ['End the cook', 'Keep it open'] });
   if (!reading.power) return finish();
 
   const all = ctx.all = (history || []).concat([reading]);
@@ -375,6 +410,15 @@ function check({ cook: c0, reading, history, now, alerts }) {
     enter(cook, role, st.step + 1, ctx);
   }
 
+  // 6b. His own "tell me at" on a thermometer: once, two readings in a row past the line, like a meat line.
+  for (const m of cook.marks || []) {
+    if (m.told) continue;
+    const s = series(all, m.pid).slice(-RULES.meatConfirm), last = s[s.length - 1];
+    if (s.length < RULES.meatConfirm || last.at !== reading.at || !s.every(p => (m.down ? p.v <= m.at : p.v >= m.at))) continue;
+    m.told = true;
+    say(out, 'step', `The ${nameOf(cook, m.pid)} ${m.down ? 'came down to' : 'reached'} ${m.at}°F (${r0(last.v)}°F now).` + quoteAll(cook, reading), { thermometer: m.pid });
+  }
+
   // 7. After Cook done: each meat rests off the smoker down to 160, then the hold. A meat whose probe wasn't
   // reading at Cook done is his call (Rested).
   if (cook.phase === 'rest') {
@@ -397,6 +441,17 @@ function check({ cook: c0, reading, history, now, alerts }) {
     if (step.until && !('minutes' in step.until)) needed.add(probeOf(step.until, role));
   }
   for (const role of Object.keys(cook.probes || {})) {
+    // The thermometer the plan follows is gone: he's told and the next plugged one takes over. Never one that already
+    // follows a meat, one reading the pit's air, or one past the line the plan waits on (it would end the step).
+    const gone = needed.has(role) && ctx.on.probe && cook.glitches[role] >= RULES.glitchAlertAfter;
+    const next = gone ? plugged(reading).find(id => !roleOf(cook, id) && reading.probes[id] < reading.pit - RULES.ambientWithin && !pastLine(cook, role, reading.probes[id])) : null;
+    if (next) {
+      const was = nameOf(cook, cook.probes[role]), now_ = nameOf(cook, next);
+      cook.probes[role] = next; cook.glitches[role] = 0; delete cook.alarms['probe:' + role];
+      ctx.temps = tempsNow(cook, all, reading);
+      alert(ctx, 'probe', `The ${was} thermometer stopped reading. The ${now_} (${r0(reading.probes[next])}°F) follows the ${role} now.`);
+      continue;
+    }
     episode(ctx, 'probe:' + role, needed.has(role) && cook.glitches[role] >= RULES.glitchAlertAfter,
       `The ${role} probe reads wrong (unplugged or moved?). I'm waiting on it.`, `The ${role} probe reads right again.`);
   }
@@ -438,6 +493,8 @@ function check({ cook: c0, reading, history, now, alerts }) {
 //   end           the cook is over                answer <words>  one of an ask's two answers
 //   plan { plan | plan_id's plan, probes?, tells? }  a plan or cooking points on the running cook (the meats it had stay)
 //   timer { name, minutes }   a timer, told once in his chat when it's up
+//   probe { probe, name?, at?, down?, follow? }  a thermometer: its name, its own "tell me at" (at: null clears it), which of the
+//                 plan's meats it follows; any time, and nothing else moves (the tracks and their clocks stay)
 const ANSWERS = { 'Back to the plan': 'resume', 'Keep mine': 'keep', 'Try again': 'retry', 'Leave it': 'keep', 'End it': 'end', 'End the cook': 'end' };
 function act({ cook: c0, action, value, reading, now, alerts }) {
   const cook = copy(c0), out = { orders: [], events: [] };
@@ -509,7 +566,7 @@ function act({ cook: c0, action, value, reading, now, alerts }) {
       toHold(ctx, 'Rested. ');
       break;
     case 'end':
-      cook.status = 'done'; cook.endedAt = now; note(out, 'note', 'Cook ended.');
+      cook.status = 'done'; cook.endedAt = now; cook.endedBy = 'hector'; note(out, 'note', 'Cook ended.');
       break;
     case 'timer': {
       const t = value && typeof value === 'object' ? value : { minutes: value };
@@ -524,10 +581,13 @@ function act({ cook: c0, action, value, reading, now, alerts }) {
       // step; the meats the cook already had stay as they are unless the new plan names the same meat.
       if (cook.phase !== 'cook') return fail('The cook is done: the rest and the hold run on their own.');
       const v = value && typeof value === 'object' ? value : {};
-      const w = withTells(v.plan || cook.plan, Object.assign({}, cook.probes, v.probes || {}), v.tells);
+      // A thermometer he only named that now follows one of the plan's meats keeps its name; that bare role makes way.
+      const wanted = v.probes || {}, taken = new Set(Object.values(wanted)), had = {};
+      for (const [r, pid] of Object.entries(cook.probes || {})) if (wanted[r] || !taken.has(pid) || cook.plan.tracks[r]) had[r] = pid;
+      const w = withTells(v.plan || cook.plan, Object.assign({}, had, wanted), v.tells);
       const merged = copy(w.plan); merged.probes = Array.isArray(merged.probes) ? merged.probes.slice() : []; merged.tracks = Object.assign({}, merged.tracks);
       const kept = {};
-      for (const r of Object.keys(cook.probes || {})) {
+      for (const r of Object.keys(had)) {
         if (!merged.probes.includes(r)) merged.probes.push(r);
         else if (merged.tracks[r]) continue;                           // the new plan speaks for this meat
         if (cook.plan.tracks[r]) merged.tracks[r] = cook.plan.tracks[r];   // a meat the plan only follows keeps its own line
@@ -537,11 +597,58 @@ function act({ cook: c0, action, value, reading, now, alerts }) {
       if (errors.length) return fail(Array.from(new Set(errors)).join(' '));
       cook.plan = merged; cook.probes = {};
       for (const r of merged.probes) if (w.probes[r]) cook.probes[r] = w.probes[r];
-      cook.tracks = kept; cook.status = 'running'; cook.pausedFor = null; cook.pending = null; cook.failed = null;
+      cook.tracks = kept; cook.status = 'running'; cook.pausedFor = null; cook.pending = null; cook.failed = null; cook.auto = false; cook.offSince = null;
       cook.timers = (cook.timers || []).concat(timerRows(w.timers, now));
       ctx.temps = tempsNow(cook, ctx.all, reading);
       note(out, 'note', `Now on the plan "${merged.name}".`);
       for (const role of Object.keys(merged.tracks)) if (!kept[role] && (role === 'pit' || cook.probes[role])) enter(cook, role, 0, ctx);
+      break;
+    }
+    case 'probe': {
+      const v = value && typeof value === 'object' ? value : {}, pid = v.probe;
+      if (!PROBE_ID.test(String(pid))) return fail(`"${pid}" isn't a thermometer.`);
+      cook.names = cook.names || {}; cook.marks = cook.marks || [];
+      const said = [];
+      if ('name' in v) {
+        const name = String(v.name || '').trim().slice(0, 24), had = roleOf(cook, pid);
+        const waited = had && (cook.plan.tracks[had] || (cook.plan.tracks.pit || []).some(s => s.until && probeOf(s.until, 'pit') === had));
+        if (name) {
+          cook.names[pid] = name;
+          if (!had) {            // a name makes it a meat: it rests, it holds, a plan's Cook done speaks of it
+            const base = name.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^[_0-9]+|_+$/g, '');
+            if (!base) return fail('A name needs a letter.');
+            let role = base;
+            for (let i = 2; role === 'pit' || cook.plan.probes.includes(role) || cook.plan.tracks[role]; i++) role = `${base}_${i}`;
+            cook.plan.probes = (cook.plan.probes || []).concat(role); cook.probes[role] = pid;
+          }
+        } else {
+          delete cook.names[pid];
+          if (had && !waited) { delete cook.probes[had]; cook.plan.probes = cook.plan.probes.filter(r => r !== had); cook.resting = (cook.resting || []).filter(r => r !== had); }
+        }
+        said.push(name ? `named ${name}` : 'its name cleared');
+      }
+      if ('at' in v) {
+        const line = v.at == null || v.at === '' ? null : +v.at;
+        if (line !== null && !(line >= RULES.probeMin && line < RULES.probeMax)) return fail(`${v.at} isn't a temperature.`);
+        cook.marks = cook.marks.filter(m => m.pid !== pid);
+        if (line !== null) cook.marks.push({ pid, at: line, down: !!v.down, told: false });
+        said.push(line !== null ? `tell at ${line}°F` : 'no tell');
+      }
+      if (v.follow) {
+        const role = v.follow, was = cook.probes[role], other = roleOf(cook, pid);
+        if (!cook.plan.probes.includes(role)) return fail(`This plan has no "${role}".`);
+        if (other && other !== role) {
+          const waited = cook.plan.tracks[other] || (cook.plan.tracks.pit || []).some(s => s.until && probeOf(s.until, 'pit') === other);
+          if (was) cook.probes[other] = was;                     // two meats swap their thermometers
+          else if (waited) return fail(`It follows the ${other}: give the ${other} another thermometer first.`);
+          else { delete cook.probes[other]; cook.plan.probes = cook.plan.probes.filter(r => r !== other); }
+        }
+        cook.probes[role] = pid; cook.glitches = cook.glitches || {}; cook.glitches[role] = 0;
+        ctx.temps = tempsNow(cook, ctx.all, reading);
+        if (cook.plan.tracks[role] && !cook.tracks[role] && cook.phase === 'cook') enter(cook, role, 0, ctx);
+        said.push(`follows the ${role}`);
+      }
+      note(out, 'note', `${capName(nameOf(cook, pid))}: ${said.join(', ') || 'no change'}.`);
       break;
     }
     default:

@@ -9,9 +9,10 @@ function renderAll() {
   if (!S.mode) return;
   renderStatus(); renderDemoBar();
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === S.tab));
-  const v = S.view = S.cook ? buildView(S.cook, S.readings, S.events, S.now()) : null;
+  const idle = !S.cook && S.tab === 'now' ? idleCook() : null, was = S.idle || { readings: [], events: [] };
+  const v = S.view = S.cook ? buildView(S.cook, S.readings, S.events, S.now()) : idle ? buildView(idle, was.readings, was.events, S.now(), S.last) : null;
   const main = $('#main');
-  if (S.tab === 'now') main.innerHTML = v ? nowHTML(v) : emptyHTML();
+  if (S.tab === 'now') main.innerHTML = nowHTML(v);
   else if (S.tab === 'plans') main.innerHTML = S.sub ? planViewHTML(S.sub) : plansHTML();
   else if (S.tab === 'history') main.innerHTML = S.sub ? pastHTML(S.sub) : historyHTML();
   else main.innerHTML = alertsHTML();
@@ -50,46 +51,54 @@ function nowHTML(v) {
   const c = v.cook, word = PHASE_WORD[v.phase] || 'Cooking';
   const sinceT = v.phase === 'cook' || v.phase === 'paused' ? c.startedAt : c.phaseAt || c.startedAt;
   const since = `${v.phase === 'cook' ? 'started' : word.toLowerCase() + ' since'} ${fmtClock(sinceT)}, ${fmtDur(v.elapsed / MINUTE)} in`;
-  const head = `<div class="phase"><h2><span class="tag ${v.phase}">${word}</span>${esc(v.plan.name)}</h2><div class="since">${esc(since)}</div></div>`;
-  const meats = v.roles.map(r => meatHTML(r, v)).join(''), pit = pitHTML(v), asks = v.asks.map(askHTML).join('');
-  const graph = graphHTML(v), steps = stepsHTML(v), log = logHTML(v.events, v.now, 6, c), sensors = sensorsHTML(v);
+  // One screen, plan or no plan: the Pit, its thermometers, the graph, the rest. The header is the plan's and goes with it.
+  const head = v.hasPlan ? `<div class="phase"><h2><span class="tag ${v.phase}">${word}</span>${esc(v.plan.name)}</h2><div class="since">${esc(since)}</div></div>` : '';
+  const n = v.tiles.length, meats = n ? `<div class="tiles${n > 1 ? ' many n' + Math.min(n, 4) : ''}">${v.tiles.map(r => meatHTML(r, v)).join('')}</div>` : '';
+  const pit = pitHTML(v), asks = v.asks.map(askHTML).join('');
+  const graph = graphHTML(v), log = logHTML(v.events, v.now, 6, c), sensors = sensorsHTML(v);
+  const steps = v.hasPlan ? stepsHTML(v) : `<section class="steps"><h3>No plan running <button type="button" class="mini" data-act="go-plans">Run a plan</button>${c.idle ? '' : ' <button type="button" class="mini" data-act="points">Cooking points</button>'}</h3></section>`;
   if (wideScreen()) return `<section class="now">${head}<div class="left">${pit}${meats}${asks}${steps}${sensors}</div><div class="rightcol">${graph}${log}</div></section>`;
   return `<section class="now">${head}${pit}${meats}${asks}${graph}${steps}${log}${sensors}</section>`;
 }
 function meatHTML(r, v) {
   const temp = r.temp == null ? '<div class="temp none">not reading</div>' : `<div class="temp${r.stale ? ' stale' : ''}">${rnd(r.temp)}<sup>°F</sup></div>`;
   let line = '';
-  if (r.resting) line = '<div class="line resting">resting, I tell you at <b>160</b></div>';
+  if (v.cook.idle) line = '';
+  else if (r.resting) line = '<div class="line resting">resting, I tell you at <b>160</b></div>';
   else if (v.phase === 'hold' || (v.phase === 'rest' && r.ended && !r.resting)) line = `<div class="line">${v.phase === 'hold' ? 'holding, watched for <b>140</b>' : 'off the smoker'}</div>`;
   else if (r.ended) line = `<div class="line dim">${esc(r.step && r.step.name || 'off the smoker')}</div>`;
   else if (r.until) line = `<div class="line">${r.until.html}</div>`;
   else if (r.step) line = `<div class="line dim">${esc(r.step.name || 'waits for you')}</div>`;
+  else if (r.mark) line = `<div class="line">tell me at <b>${r.mark.at}</b></div>`;
   else line = '<div class="line dim">no target, just watched</div>';
+  const mark = r.mark && (r.until || r.step) && !v.cook.idle ? `<div class="pace">tell me at <b>${r.mark.at}</b></div>` : '';
   const rate = r.rate == null ? '' : `<div class="rate${r.stalled ? ' stall' : ''}">${r.stalled ? 'the stall, ' : ''}${r.rate >= 0 ? '+' : '−'}${Math.abs(r.rate).toFixed(Math.abs(r.rate) >= 10 ? 0 : 1)}°/h</div>`;
   const pace = r.pace ? `<div class="pace">at this pace, ${r.pace.value} around <b>${fmtClock(r.pace.at)}</b></div>` : '';
   const track = r.steps.length > 1 && r.track ? `<div class="track">${r.steps.map((s, i) => `<span class="${i < r.track.step ? 'done' : i === r.track.step ? 'cur' : ''}">${esc(s.name || 'step ' + (i + 1))}</span>`).join('')}</div>` : '<div></div>';
   const age = r.tempAt ? `<span class="age${r.stale ? ' stale' : ''}">${r.stale ? 'last read ' + fmtClock(r.tempAt) : `<span data-age="${r.tempAt}">${fmtAgo(r.tempAt, v.now)}</span>`}</span>` : '';
-  return `<article class="meat" style="--c:${r.color}" data-role="${esc(r.role)}">
-    <div class="head"><div class="role">${esc(r.role)}${r.step && r.step.name && r.steps.length > 1 ? `<span class="stepname">, ${esc(r.step.name)}</span>` : ''}</div>${age}</div>
-    <div class="big">${temp}<div class="right">${line}${rate}${pace}</div></div>
-    <div class="foot">${track}<canvas class="spark" data-role="${esc(r.role)}" width="192" height="60" aria-hidden="true"></canvas></div></article>`;
+  const tap = !v.cook.idle && !v.cook.endedAt ? ` role="button" tabindex="0" aria-label="${esc(capFirst(r.name))}: name it, or tell me at" data-act="tile" data-v="${esc(r.pid)}"` : '';
+  return `<article class="meat" style="--c:${r.color}" data-pid="${esc(r.pid)}"${tap}>
+    <div class="head"><div class="role">${esc(r.name)}${r.step && r.step.name && r.steps.length > 1 ? `<span class="stepname">, ${esc(r.step.name)}</span>` : ''}</div>${age}</div>
+    <div class="big">${temp}<div class="right">${line}${rate}${pace}${mark}</div></div>
+    ${v.cook.idle ? '' : `<div class="foot">${track}<canvas class="spark" data-pid="${esc(r.pid)}" width="192" height="60" aria-hidden="true"></canvas></div>`}</article>`;
 }
 function pitHTML(v) {
   const p = v.pit, c = v.cook;
   const temp = p.temp == null ? '<div class="temp none">no reading</div>' : `<div class="temp">${rnd(p.temp)}<sup>°F</sup></div>`;
-  const heat = `<div class="heat${p.heating ? ' on' : ''}">${p.heating ? 'heating' : 'holding'}</div>`;
+  const heat = v.last && v.last.power === false ? '<div class="heat">smoker off</div>' : `<div class="heat${p.heating ? ' on' : ''}">${p.heating ? 'heating' : 'holding'}</div>`;
   let line = '';
-  if ((v.phase === 'cook' || v.phase === 'paused') && p.step) {
+  if (!v.hasPlan) line = c.idle ? '' : `<div class="next">On since <b>${fmtClock(c.startedAt)}</b>, ${fmtDur(v.elapsed / MINUTE)}</div>`;
+  else if ((v.phase === 'cook' || v.phase === 'paused') && p.step) {
     const s = p.step, last = p.idx === p.steps.length - 1;
     line = `<div class="next"><b>${esc(s.name || 'Step ' + (p.idx + 1))}</b>${typeof s.set === 'number' ? `, pit at ${s.set}` : ''}${p.until ? ', ' + p.until.html : last ? '. The last step: tap Cook done when the meat is off' : ''}${p.next ? ` <span class="dim">then ${esc(p.next.name || 'the next step')}${typeof p.next.set === 'number' ? ` at ${p.next.set}` : ''}</span>` : ''}</div>`;
   } else if (v.phase === 'rest') line = `<div class="next">Cook done. The pit sits at <b>${c.restSet || 150}</b> for the hold.</div>`;
   else if (v.phase === 'hold') line = `<div class="next">Holding at <b>${c.restSet || 150}</b>. The meat is watched for 140.</div>`;
   const pending = c.pending ? `<div class="pending">Sent ${c.pending.set}°F, waiting for the smoker to take it</div>` : c.failed ? `<div class="pending">The smoker didn't take ${c.failed.set}°F</div>` : '';
-  const looked = v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
-  const live = !c.endedAt && c.status !== 'done' && c.status !== 'stopped' && !(S.mode === 'demo' && c.status !== 'running');
+  const looked = v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : c.idle ? `last read ${fmtClock(v.sensors.lastHeard)}` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
+  const live = c.idle || (!c.endedAt && c.status !== 'done' && c.status !== 'stopped' && !(S.mode === 'demo' && c.status !== 'running'));
   const set = live ? `<button type="button" class="set-temp" data-act="set-pit">Set temp${p.set ? ` <b>${p.set}</b>` : ''}</button>` : p.set ? `<div class="set">set <b>${p.set}</b></div>` : '<div class="set dim">no setpoint</div>';
   const timers = (v.timers || []).filter(t => !t.told || v.now - t.at < 2 * HOUR).slice(-3).map(t => t.told ? `<span class="tm done">${esc(t.name)}: up at ${fmtClock(t.at)}</span>` : `<span class="tm"><b>${esc(t.name)}</b> ${fmtDur(t.left)} left, ${fmtClock(t.at)}</span>`).join('');
-  const tools = live ? `<div class="pit-tools">${timers}<button type="button" class="mini" data-act="timer">Set timer</button></div>` : timers ? `<div class="pit-tools">${timers}</div>` : '';
+  const tools = live && !c.idle ? `<div class="pit-tools">${timers}<button type="button" class="mini" data-act="timer">Set timer</button></div>` : timers ? `<div class="pit-tools">${timers}</div>` : '';
   return `<article class="pit"><div class="head"><div class="role">Pit</div><div class="stepname">${looked}</div></div><div class="big">${temp}<div class="right">${set}${heat}</div></div>${line}${pending}${tools}</article>`;
 }
 function askHTML(a) {
@@ -97,12 +106,13 @@ function askHTML(a) {
     <div class="two"><button class="btn" data-act="answer" data-v="${esc(a.ask[0])}">${esc(a.ask[0])}</button><button class="btn" data-act="answer" data-v="${esc(a.ask[1])}">${esc(a.ask[1])}</button></div></article>`;
 }
 function legendHTML(v) {
-  const items = [{ key: 'pit', label: 'Pit', color: PIT_COLOR }, { key: 'set', label: 'Setpoint', color: PIT_COLOR, dash: true }].concat(v.roles.map(r => ({ key: r.role, label: capFirst(r.role), color: r.color })));
+  const items = [{ key: 'pit', label: 'Pit', color: PIT_COLOR }, { key: 'set', label: 'Setpoint', color: PIT_COLOR, dash: true }].concat(v.lines.map(r => ({ key: r.pid, label: capFirst(r.name), color: r.color })));
   return `<div class="legend">${items.map(i => `<button type="button" data-act="legend" data-v="${esc(i.key)}" class="${S.hidden[i.key] ? 'off' : ''}" style="--c:${i.color}" aria-pressed="${!S.hidden[i.key]}"><span class="key${i.dash ? ' dash' : ''}"></span>${esc(i.label)}</button>`).join('')}</div>`;
 }
 function graphHTML(v) {
-  if (!S.readings.length && !(S.histData[v.cook.id] && S.histData[v.cook.id].readings.length)) return '<section class="graph"><div class="empty">No readings yet. The first look draws the first point.</div></section>';
-  return `<section class="graph"><div class="ghead">${legendHTML(v)}<button type="button" class="expand" data-act="expand">Full graph</button></div><div class="chart" id="chart"><canvas></canvas><div class="scrub"></div><div class="readout"></div></div></section>`;
+  if (!readingsOf(v).length) return '<section class="graph"><div class="empty">No readings yet. The first look draws the first point.</div></section>';
+  const when = v.cook.idle ? `<div class="gwhen">Your last session, ${fmtDay(v.cook.startedAt)}, ${fmtDur((v.cook.endedAt - v.cook.startedAt) / MINUTE)}</div>` : '';
+  return `<section class="graph">${when}<div class="ghead">${legendHTML(v)}<button type="button" class="expand" data-act="expand">Full graph</button></div><div class="chart" id="chart"><canvas></canvas><div class="scrub"></div><div class="readout"></div></div></section>`;
 }
 function stepsHTML(v) {
   const p = v.pit, c = v.cook, cookPhase = v.phase === 'cook' || v.phase === 'paused';
@@ -140,19 +150,6 @@ function sensorsHTML(v) {
   ].join('');
   return `<section class="sensors"><h3>The smoker</h3><div class="row">${chips}</div></section>`;
 }
-function emptyHTML() {
-  const l = S.last, now = Date.now();
-  const pids = l ? Object.keys(l.probes).filter(k => l.probes[k] != null) : [];
-  const vals = l ? `<div class="lastread"><div class="v"><div class="k">Pit</div><div class="n">${l.pit == null ? '<span class="dim">no reading</span>' : rnd(l.pit) + '°'}</div></div>
-      <div class="v"><div class="k">Setpoint</div><div class="n">${l.set ? l.set + '°' : '<span class="dim">none</span>'}</div></div>
-      ${pids.map(p => `<div class="v"><div class="k">Probe ${p.slice(1)}</div><div class="n">${rnd(l.probes[p])}°</div></div>`).join('')}
-      <div class="v"><div class="k">Power</div><div class="n ${l.power ? '' : 'dim'}">${l.power ? 'on' : 'off'}</div></div></div>` : '';
-  const heard = l ? `Last read ${fmtDay(l.at)} at ${fmtClock(l.at)} (<span data-age="${l.at}">${fmtAgo(l.at, now)}</span>).${now - l.at > STALE_MINUTES * MINUTE ? ' Nothing looks on its own between cooks: tap Read now for a fresh look.' : ''}` : 'The smoker has not been read yet.';
-  return `<section class="empty-cook"><div class="hero"><h2>No cook running</h2><p>${heard}</p>${vals}</div>
-    <div class="go"><button type="button" class="btn primary" data-act="start-cook">Start a cook</button><button type="button" class="btn" data-act="read-now">Read now</button></div>
-    <div class="go three"><button type="button" class="btn" data-act="set-pit">Set pit</button><button type="button" class="btn" data-act="power">${l ? (l.power ? 'Power off' : 'Power on') : 'Power'}</button><span class="note dim">${l ? `${l.set ? `Set to ${l.set}°F` : 'No setpoint'}, ${l.power ? 'on' : 'off'} at the last look.` : 'Read the smoker once and the app knows whether it is on.'}</span></div>
-    <p class="note dim">Set the pit, name the meat on each probe with the temperature to tell you at, add cooking points if you want the smoker to change on its own. The engine looks every two minutes and tells you in your Jarvis chat; your phone can sleep. A plan from the Plans tab can join at any time.</p></section>`;
-}
 
 // ---- Plans --------------------------------------------------------------------------------------------------
 function planSummary(p) {
@@ -174,7 +171,7 @@ function planViewHTML(id) {
   return `<section class="plan-view"><a class="back" href="#plans">← Plans</a><h2>${esc(p.name)}</h2>${p.for ? `<div class="dim">for ${esc(p.for)}</div>` : ''}${p.notes ? `<p class="notes">${esc(p.notes)}</p>` : ''}
     <div class="dim" style="font-size:13px">Pit up to ${p.max_pit}°F. Probes: ${(p.probes || []).map(esc).join(', ') || 'none'}.</div>
     ${tracks.map(([role, steps]) => trackHTML(role, steps, p.probes)).join('')}
-    <div class="row">${S.cook && !S.cook.endedAt && S.cook.phase === 'cook' && !(S.mode === 'demo' && S.cook.status !== 'running') ? `<button type="button" class="btn primary" data-act="use-plan" data-v="${esc(r.id)}">Use on the running cook</button><button type="button" class="btn" data-act="start-plan" data-v="${esc(r.id)}">Start a new cook with it</button>` : `<button type="button" class="btn primary" data-act="start-plan" data-v="${esc(r.id)}">Start a cook with this plan</button>`}</div>
+    <div class="row">${S.cook && !S.cook.endedAt && S.cook.phase === 'cook' && !(S.mode === 'demo' && S.cook.status !== 'running') ? `<button type="button" class="btn primary" data-act="use-plan" data-v="${esc(r.id)}">${S.cook.auto || S.cook.plan.name === 'Just watch' ? 'Run this plan' : 'Use on the running cook'}</button>` : `<button type="button" class="btn primary" data-act="start-plan" data-v="${esc(r.id)}">Run this plan</button>`}</div>
     <div class="row"><button type="button" class="btn" data-act="edit-plan" data-v="${esc(r.id)}">Edit</button><button type="button" class="btn" data-act="dup-plan" data-v="${esc(r.id)}">Duplicate</button><button type="button" class="btn danger" data-act="archive-plan" data-v="${esc(r.id)}">Archive</button></div></section>`;
 }
 
@@ -222,16 +219,19 @@ function alertsHTML() {
 // ---- the strip and the action bar -----------------------------------------------------------------------------
 function renderStrip(v) {
   const s = $('#strip'); if (!s) return;
-  if (!v || S.tab === 'now' || v.cook.endedAt || (S.mode === 'demo' && v.cook.status !== 'running')) { s.hidden = true; return; }
+  if (!v || S.tab === 'now' || v.cook.idle || v.cook.endedAt || (S.mode === 'demo' && v.cook.status !== 'running')) { s.hidden = true; return; }
   s.hidden = false;
-  s.innerHTML = `<span class="ph">${PHASE_WORD[v.phase] || 'Cooking'}</span><span class="v"><span class="key" style="background:${PIT_COLOR}"></span><span class="n">${v.pit.temp == null ? '—' : rnd(v.pit.temp) + '°'}</span><span class="k">pit${v.pit.set ? ' / ' + v.pit.set : ''}</span></span>${v.roles.map(r => `<span class="v"><span class="key" style="background:${r.color}"></span><span class="n">${r.temp == null ? '—' : rnd(r.temp) + '°'}</span><span class="k">${esc(r.role)}</span></span>`).join('')}<span class="go">Now ›</span>`;
+  s.innerHTML = `<span class="ph">${PHASE_WORD[v.phase] || 'Cooking'}</span><span class="v"><span class="key" style="background:${PIT_COLOR}"></span><span class="n">${v.pit.temp == null ? '—' : rnd(v.pit.temp) + '°'}</span><span class="k">pit${v.pit.set ? ' / ' + v.pit.set : ''}</span></span>${v.tiles.map(r => `<span class="v"><span class="key" style="background:${r.color}"></span><span class="n">${r.temp == null ? '—' : rnd(r.temp) + '°'}</span><span class="k">${esc(r.name)}</span></span>`).join('')}<span class="go">Now ›</span>`;
 }
 function renderActions(v) {
   const a = $('#actions'); if (!a) return;
-  if (!v || S.tab !== 'now' || v.cook.endedAt || v.cook.status === 'done' || v.cook.status === 'stopped') { a.hidden = true; return; }
+  if (!v || S.tab !== 'now') { a.hidden = true; return; }
+  if (v.cook.idle) { const l = v.last; a.hidden = false; a.className = 'actions three'; a.innerHTML = `<button type="button" class="btn" data-act="read-now">Read now</button><button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn" data-act="power">${l ? (l.power ? 'Power off' : 'Power on') : 'Power'}</button>`; return; }
+  if (v.cook.endedAt || v.cook.status === 'done' || v.cook.status === 'stopped') { a.hidden = true; return; }
   a.hidden = false;
   const paused = v.cook.status === 'paused';
-  if (v.phase === 'cook' || v.phase === 'paused') { a.className = 'actions'; a.innerHTML = `<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn" data-act="next">Next step</button><button type="button" class="btn" data-act="${paused ? 'resume' : 'pause'}">${paused ? 'Resume' : 'Pause'}</button><button type="button" class="btn primary" data-act="done">Cook done</button>`; }
+  if (!v.hasPlan) { a.className = 'actions two'; a.innerHTML = '<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn primary" data-act="done">Cook done</button>'; }
+  else if (v.phase === 'cook' || v.phase === 'paused') { a.className = 'actions'; a.innerHTML = `<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn" data-act="next">Next step</button><button type="button" class="btn" data-act="${paused ? 'resume' : 'pause'}">${paused ? 'Resume' : 'Pause'}</button><button type="button" class="btn primary" data-act="done">Cook done</button>`; }
   else if (v.phase === 'rest') { a.className = 'actions three'; a.innerHTML = '<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn" data-act="rested">Rested</button><button type="button" class="btn primary" data-act="end">End cook</button>'; }
   else { a.className = 'actions two'; a.innerHTML = '<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn primary" data-act="end">End cook</button>'; }
 }
@@ -241,7 +241,7 @@ function afterRender(v) {
   if (S.chart) { S.chart.destroy(); S.chart = null; }
   const host = $('#chart');
   if (host && S.view) { S.chart = new PitChart(host, { zoom: false }); S.chart.setData(chartDataOf(S.view)); }
-  if (S.view) for (const c of $$('canvas.spark')) { const r = S.view.roles.find(x => x.role === c.dataset.role); if (r) drawSpark(c, r.spark.length > 1 ? r.spark : r.pts.slice(-30), r.color); }
+  if (S.view) for (const c of $$('canvas.spark')) { const r = S.view.roles.find(x => x.pid === c.dataset.pid); if (r) drawSpark(c, r.spark.length > 1 ? r.spark : r.pts.slice(-30), r.color); }
   for (const c of $$('canvas[data-thumb]')) {
     const id = c.dataset.thumb, data = S.histData[id], cook = S.history.find(h => h.id === id);
     if (data) drawThumb(c, data.readings, cook && cook.probes); else loadHistData(id).then(() => { if (document.body.contains(c) && S.histData[id]) drawThumb(c, S.histData[id].readings, cook && cook.probes); });

@@ -3,7 +3,7 @@
 'use strict';
 const ACTION_WORDS = { set: v => `Set the pit to ${v}°F`, next: () => 'Next step', pause: () => 'Pause the plan', resume: () => 'Back to the plan', done: () => 'Cook done', rested: () => 'Rested',
   end: () => 'End the cook', answer: v => `“${v}”`, power: v => v ? 'Power on' : 'Power off', read: () => 'Read the smoker', start: () => 'Start the cook', save_plan: () => 'Save the plan',
-  archive_plan: () => 'Archive the plan', note: () => 'Save the note', rate: () => 'Rate the cook', units_f: () => 'Switch the smoker to °F', keep: () => 'Keep it', retry: () => 'Try again', ping: () => 'Test alert to your phones' };
+  archive_plan: () => 'Archive the plan', probe: () => 'Save the thermometer', note: () => 'Save the note', rate: () => 'Rate the cook', units_f: () => 'Switch the smoker to °F', keep: () => 'Keep it', retry: () => 'Try again', ping: () => 'Test alert to your phones' };
 const describeOrder = (a, v) => (ACTION_WORDS[a] || (() => a))(v);
 
 // ---- toasts ---------------------------------------------------------------------------------------------------
@@ -58,9 +58,9 @@ async function placeOrder(action, value, opts) {
   const live = S.cook && !S.cook.endedAt && (S.cook.status === 'running' || S.cook.status === 'paused');
   const row = { pit_id: S.pit.id, cook_id: opts.cookId || (live ? S.cook.id : null), action, value: value === undefined ? null : value };
   let inserted;
-  try { inserted = (await sb.insert('orders', row))[0]; } catch (e) { toast('Could not write the order: ' + e.message, 'bad'); return null; }
+  try { inserted = (await sb.insert('orders', row))[0]; } catch (e) { if (!opts.quiet) toast('Could not write the order: ' + e.message, 'bad'); return null; }
   S.orders.push({ id: inserted.id, action, value, at: Date.now(), status: 'waiting' });
-  const t = toast(`${describeOrder(action, value)}: waiting for the engine…`, 'wait', 0);
+  const t = opts.quiet ? { update() {} } : toast(`${describeOrder(action, value)}: waiting for the engine…`, 'wait', 0);
   // The ring. A ring that lands while the cook's look is running is turned away (409) and the page can't see that
   // (no-cors), so an order still waiting after 12 and 24 seconds is rung again; the look itself takes about 10.
   const ring = async () => { try {
@@ -117,7 +117,7 @@ function openNext() {
     onFire: () => placeOrder('next', pick === 'pit' ? undefined : pick) });
 }
 function openDone() {
-  const v = S.view, meats = v ? v.roles.filter(r => r.temp != null).map(r => r.role) : [];
+  const v = S.view, meats = v ? v.roles.filter(r => r.role && r.temp != null).map(r => r.role) : [];
   confirmSheet({ title: 'Cook done', sub: `The pit drops to ${v && v.last && v.last.range ? v.last.range.min : 150}°F for the hold. ${meats.length ? `The ${meats.join(' and the ')} rest off the smoker; I tell you at 160.` : 'Tap Rested when the meat is down to 160–155.'} Then the hold, as long as you can.`, label: 'Cook done', onFire: () => placeOrder('done') });
 }
 function openRested() { confirmSheet({ title: 'Rested', sub: 'The meat is down to 160–155. Back in the smoker or the oven at 150: the hold begins and I watch for 140.', label: 'Rested, start the hold', onFire: () => placeOrder('rested') }); }
@@ -130,9 +130,7 @@ function openPower() {
   confirmSheet({ title: on ? 'Turn the smoker off' : 'Turn the smoker on', sub: on ? 'Same as the power button on the smoker. A running cook is told the smoker is off and asks what to do.' : 'The smoker powers on. You still light it.', label: on ? 'Power off' : 'Power on', cls: on ? 'danger' : 'primary', onFire: () => placeOrder('power', !on) });
 }
 function openReadNow() { placeOrder('read'); }
-// ---- the basic start (his ask 10-28): the smoker big, set temp, a timer, each probe's meat and its own temperature,
-//      and the cooking points: "when the meat hits X, smoker to Y". No plan to pick; plans have their own tab. ----------
-const TIMER_PRESETS = [0, 30, 45, 60, 90, 120], TEMP_PRESETS = [0, 200, 225, 250, 275, 300, 325];
+const TIMER_PRESETS = [0, 30, 45, 60, 90, 120];
 function smokerNowHTML(last) {
   if (!last) return '<div class="nowbox"><div class="k">The smoker now</div><div class="dim">no reading yet</div></div>';
   const probes = probeSources().map(p => `<span>${esc(p.label)} <b>${last.probes && last.probes[p.id] != null ? rnd(last.probes[p.id]) + '°' : '—'}</b></span>`).join('');
@@ -141,69 +139,54 @@ function smokerNowHTML(last) {
 function presetsHTML(name, values, current, unit, zero) {
   return `<div class="presets" data-presets="${name}">${values.map(v => `<button type="button" data-v="${v}" class="${(current || 0) === v ? 'on' : ''}">${v === 0 ? zero : v + unit}</button>`).join('')}</div>`;
 }
-function openNewCook() {
-  const last = S.last || (S.view && S.view.last) || null;
-  const st = { setTemp: last && last.set >= 150 ? last.set : 225, timer: 0, meats: probeSources().map(p => ({ probe: p.id, label: p.label, name: '', target: '' })), points: [], follow: '' };
-  const named = () => st.meats.filter(m => slugRole(m.name));
-  const body = () => {
-    const plan = composePlan(st), bad = refusals(last).concat(plan.errors);
-    return `${smokerNowHTML(last)}
-      <section class="bs"><h4>Set the pit</h4>${presetsHTML('temp', TEMP_PRESETS, st.setTemp, '', 'leave it')}<div class="stepper small"><button type="button" data-d="-5" aria-label="5 less">−</button><div class="val">${st.setTemp ? `${st.setTemp}<sup>°F</sup>` : '<span class="leave">as it is</span>'}</div><button type="button" data-d="5" aria-label="5 more">+</button></div></section>
-      <section class="bs"><h4>The meats</h4><div class="note">Name the meat on each probe and the temperature to tell you at. Each one tells you on its own.</div>
-        <div class="mrows">${st.meats.map((m, i) => `<div class="mrow"><span class="pl">${esc(m.label)}<b>${last && last.probes && last.probes[m.probe] != null ? rnd(last.probes[m.probe]) + '°' : '—'}</b></span><label class="field"><input data-m="${i}" data-k="name" placeholder="${['chicken', 'pork', 'beef', 'links'][i % 4]}" value="${esc(m.name)}" autocapitalize="none"></label><label class="field"><input data-m="${i}" data-k="target" type="number" inputmode="numeric" placeholder="°F" value="${m.target}"></label></div>`).join('')}</div></section>
-      <section class="bs"><h4>Cooking points</h4><div class="note">When a meat reaches a temperature, the smoker goes to another. The app makes the changes.</div>
-        ${named().length ? `<label class="field"><span>Follow</span><select id="follow">${named().map(m => `<option value="${esc(m.name)}"${slugRole(m.name) === slugRole(st.follow) ? ' selected' : ''}>${esc(m.name)} (${esc(m.label)})</option>`).join('')}</select></label>` : '<div class="dim" style="font-size:13px">Name a meat above first.</div>'}
-        <div class="prows">${st.points.map((pt, i) => `<div class="prow"><span>when it hits</span><label class="field"><input data-p="${i}" data-k="at" type="number" inputmode="numeric" placeholder="165" value="${pt.at}"></label><span>smoker to</span><label class="field"><input data-p="${i}" data-k="set" type="number" inputmode="numeric" placeholder="250" value="${pt.set}"></label><button type="button" data-delp="${i}" aria-label="Remove">×</button></div>`).join('')}</div>
-        <button type="button" class="add" id="add-point">Add a point</button></section>
-      <details class="bs sub"${st.timer ? ' open' : ''}><summary>Timer<span class="dim">${st.timer ? `${st.timer} min` : 'optional'}</span></summary><div class="note">Counts on the screen; your Jarvis chat gets told when it's up.</div>${presetsHTML('timer', TIMER_PRESETS, st.timer, ' min', 'none')}<label class="field"><span>Or minutes</span><input id="timer-min" type="number" inputmode="numeric" min="1" value="${st.timer && !TIMER_PRESETS.includes(st.timer) ? st.timer : ''}" placeholder="75"></label></details>
-      <div id="start-check">${bad.length ? `<p class="refuse">${esc(bad.join(' '))}</p>` : `<p class="okay">Ready: ${esc(plan.plan.name)}${named().length ? ', ' + named().map(m => m.name + (m.target ? ' to ' + m.target : '')).join(', ') : ''}${st.timer ? `, a ${st.timer}-minute timer` : ''}.</p>`}</div>`;
-  };
-  const check = sh => { const plan = composePlan(st), bad = refusals(last).concat(plan.errors); $('#start-check', sh).innerHTML = bad.length ? `<p class="refuse">${esc(bad.join(' '))}</p>` : `<p class="okay">Ready: ${esc(plan.plan.name)}.</p>`; $('#sheet-go', sh).disabled = bad.length > 0; };
-  const wire = sh => {
-    $$('[data-presets=temp] button', sh).forEach(b => b.addEventListener('click', () => { st.setTemp = +b.dataset.v; redraw(sh); }));
-    $$('.stepper button', sh).forEach(b => b.addEventListener('click', () => { st.setTemp = Math.min(700, Math.max(150, (st.setTemp || 220) + +b.dataset.d)); redraw(sh); }));
-    $$('[data-presets=timer] button', sh).forEach(b => b.addEventListener('click', () => { st.timer = +b.dataset.v; redraw(sh); }));
-    $('#timer-min', sh).addEventListener('input', e => { st.timer = +e.target.value || 0; $$('[data-presets=timer] button', sh).forEach(x => x.classList.toggle('on', +x.dataset.v === st.timer)); check(sh); });
-    $$('[data-m]', sh).forEach(el => el.addEventListener('input', () => { st.meats[+el.dataset.m][el.dataset.k] = el.value; if (el.dataset.k === 'name') { if (!st.follow || !named().some(m => slugRole(m.name) === slugRole(st.follow))) st.follow = named()[0] ? named()[0].name : ''; const f = $('#follow', sh); if (!f || named().length !== f.options.length) { const keep = document.activeElement === el ? [el.dataset.m, el.selectionStart] : null; redraw(sh); if (keep) { const again = $(`[data-m="${keep[0]}"][data-k=name]`, sh); if (again) { again.focus(); try { again.setSelectionRange(keep[1], keep[1]); } catch (e) { /* number fields */ } } } return; } } check(sh); }));
-    const f = $('#follow', sh); if (f) f.addEventListener('change', () => { st.follow = f.value; check(sh); });
-    $$('[data-p]', sh).forEach(el => el.addEventListener('input', () => { st.points[+el.dataset.p][el.dataset.k] = el.value; check(sh); }));
-    $$('[data-delp]', sh).forEach(b => b.addEventListener('click', () => { st.points.splice(+b.dataset.delp, 1); redraw(sh); }));
-    $('#add-point', sh).addEventListener('click', () => { if (!st.follow && named()[0]) st.follow = named()[0].name; st.points.push({ at: '', set: '' }); redraw(sh); setTimeout(() => { const last = $$('[data-p][data-k=at]', sh).pop(); if (last) last.focus(); }, 50); });
-    check(sh);
-  };
-  const redraw = sh => { const y = sh.scrollTop; $('.body', sh).innerHTML = body(); wire(sh); sh.scrollTop = y; };
-  confirmSheet({ title: 'Start a cook', sub: 'The basics. A plan is for "set the meat and go": pick one on the Plans tab, now or while this cook runs.', body: body(), label: 'Start the cook', full: true, disabled: true,
-    onOpen: wire,
-    onFire: () => { const plan = composePlan(st); if (plan.errors.length) return; const value = { plan: plan.plan, probes: plan.probes }; if (st.timer) value.tells = [{ name: 'timer', minutes: st.timer }]; placeOrder('start', value, { cookId: null }); } });
+// A tap on a thermometer's tile: a name, its own "tell me at", which of the plan's meats it follows. Nothing else moves.
+function openThermo(pid) {
+  const v = S.view, r = v && v.roles.find(x => x.pid === pid); if (!r) return;
+  const names = v.cook.names || {}, roles = v.hasPlan ? v.plan.probes || [] : [];
+  const follow = roles.length ? `<label class="field"><span>Follows the plan</span><select id="th-follow"${r.role ? ' disabled' : ''}>${r.role ? '' : '<option value="">no, it just shows</option>'}${roles.map(x => `<option value="${esc(x)}"${x === r.role ? ' selected' : ''}>the ${esc(x)}${v.cook.probes[x] && x !== r.role ? ` (now ${esc((v.roles.find(t => t.pid === v.cook.probes[x]) || {}).name || v.cook.probes[x])})` : ''}</option>`).join('')}</select></label>${r.role ? '<div class="note">To change it, tap the thermometer that should take over.</div>' : ''}` : '';
+  openSheet({ title: capFirst(r.name), sub: `${r.temp == null ? 'Not reading' : `${rnd(r.temp)}°F`}. Any time, and nothing resets.`,
+    body: `<div class="thermo"><label class="field"><span>Name</span><input id="th-name" value="${esc(names[pid] || '')}" placeholder="${esc(r.role || 'flat, point, chicken')}" autocapitalize="none"></label><label class="field"><span>Tell me at °F</span><input id="th-at" type="number" inputmode="numeric" value="${r.mark ? r.mark.at : ''}" placeholder="none"></label>${follow}</div>`,
+    foot: '<button type="button" class="btn primary" id="sheet-go">Save</button><button type="button" class="btn quiet" id="sheet-no">Not now</button>',
+    onOpen: sh => {
+      $('#sheet-no', sh).addEventListener('click', closeSheet);
+      $('#sheet-go', sh).addEventListener('click', () => {
+        const value = { probe: pid }, name = $('#th-name', sh).value.trim(), at = $('#th-at', sh).value, f = $('#th-follow', sh);
+        if (name !== (names[pid] || '')) value.name = name;
+        if (at !== (r.mark ? String(r.mark.at) : '')) { value.at = at === '' ? null : +at; if (at !== '' && r.temp != null && +at < r.temp) value.down = true; }
+        if (f && !r.role && f.value) value.follow = f.value;
+        closeSheet(); if (Object.keys(value).length > 1) placeOrder('probe', value);
+      });
+    } });
 }
-// A plan from the Plans tab: which probe is in which of its meats, then Start, or use it on the running cook.
+// A plan from the Plans tab: which thermometer follows it (one per meat), then Run, or use it on the running cook.
 function assignHTML(row, current) {
   const src = probeSources(), last = S.last || (S.view && S.view.last) || null;
   const live = src.filter(p => last && last.probes && last.probes[p.id] != null);   // the first pick is a probe that reads, never an empty port
-  return `<div class="assign">${(row.plan.probes || []).map((r, i) => `<div class="a"><div class="r" style="--c:${MEAT_COLORS[i % 4]}"><i></i>${esc(r)}</div><label class="field"><select data-role="${esc(r)}"><option value="">no probe</option>${src.map(p => `<option value="${esc(p.id)}"${(current && current[r] === p.id) || (!(current && current[r]) && p === (live.length ? live[i] : src[i])) ? ' selected' : ''}>${esc(p.label)}${last && last.probes && last.probes[p.id] != null ? `, ${rnd(last.probes[p.id])}°` : ''}</option>`).join('')}</select></label></div>`).join('')}</div>`;
+  return `<div class="assign">${(row.plan.probes || []).map((r, i) => `<div class="a"><div class="r" style="--c:${MEAT_COLORS[i % 4]}"><i></i>${esc(r)}</div><label class="field"><select data-role="${esc(r)}"><option value="">no thermometer</option>${src.map(p => `<option value="${esc(p.id)}"${(current && current[r] === p.id) || (!(current && current[r]) && p === (live.length ? live[i] : src[i])) ? ' selected' : ''}>${esc(p.label)}${last && last.probes && last.probes[p.id] != null ? `, ${rnd(last.probes[p.id])}°` : ''}</option>`).join('')}</select></label></div>`).join('')}</div>`;
 }
 const readAssign = sh => { const probes = {}; $$('select[data-role]', sh).forEach(x => { if (x.value) probes[x.dataset.role] = x.value; }); return probes; };
 function openStartPlan(row) {
   if (!row) return;
   const last = S.last || (S.view && S.view.last) || null; let timer = 0;
-  confirmSheet({ title: `Start: ${row.plan.name}`, sub: planSummary(row.plan), label: 'Start the cook', full: true, disabled: refusals(last).length > 0,
-    body: `${smokerNowHTML(last)}${(row.plan.probes || []).length ? `<div class="note">Which probe is in which meat?</div>${assignHTML(row)}` : ''}<details class="bs sub"><summary>Timer<span class="dim">optional</span></summary>${presetsHTML('timer', TIMER_PRESETS, 0, ' min', 'none')}</details>${refusals(last).length ? `<p class="refuse">${esc(refusals(last).join(' '))}</p>` : '<p class="okay">The smoker is on, in °F and online. The plan freezes as it is now.</p>'}`,
+  confirmSheet({ title: `Run: ${row.plan.name}`, sub: planSummary(row.plan), label: 'Run this plan', full: true, disabled: refusals(last).length > 0,
+    body: `${smokerNowHTML(last)}${(row.plan.probes || []).length ? `<div class="note">${followWords(row)}</div>${assignHTML(row)}` : ''}<details class="bs sub"><summary>Timer<span class="dim">optional</span></summary>${presetsHTML('timer', TIMER_PRESETS, 0, ' min', 'none')}</details>${refusals(last).length ? `<p class="refuse">${esc(refusals(last).join(' '))}</p>` : '<p class="okay">The smoker is on, in °F and online. The plan freezes as it is now.</p>'}`,
     onOpen: sh => $$('[data-presets=timer] button', sh).forEach(b => b.addEventListener('click', () => { timer = +b.dataset.v; $$('[data-presets=timer] button', sh).forEach(x => x.classList.toggle('on', x === b)); })),
     onFire: () => { const value = { plan_id: row.id, plan: row.plan, probes: readAssign(document) }; if (timer) value.tells = [{ name: 'timer', minutes: timer }]; placeOrder('start', value, { cookId: null }); } });
 }
+const followWords = row => (row.plan.probes || []).length > 1 ? 'Which thermometer follows each meat? Change it any time.' : 'Which thermometer follows it? Change it any time.';
 function openUsePlan(row) {
   const v = S.view; if (!row || !v) return;
-  confirmSheet({ title: `Use on the running cook: ${row.plan.name}`, sub: 'Its pit steps take over from the first one now. The meats this cook already has keep their own lines.', label: 'Use this plan now',
-    body: `${(row.plan.probes || []).length ? `<div class="note">Which probe is in which of its meats?</div>${assignHTML(row, v.cook.probes)}` : ''}<div class="note">${esc(planSummary(row.plan).replace(/<[^>]+>/g, ''))}</div>`,
+  confirmSheet({ title: `${v.hasPlan ? 'Use on the running cook' : 'Run'}: ${row.plan.name}`, sub: 'Its pit steps take over from the first one now. The meats this cook already has keep their own lines.', label: 'Use this plan now',
+    body: `${(row.plan.probes || []).length ? `<div class="note">${followWords(row)}</div>${assignHTML(row, v.cook.probes)}` : ''}<div class="note">${esc(planSummary(row.plan).replace(/<[^>]+>/g, ''))}</div>`,
     onFire: () => placeOrder('plan', { plan_id: row.id, plan: row.plan, probes: readAssign(document) }) });
 }
 function openPoints() {
   const v = S.view; if (!v || v.phase !== 'cook' && v.phase !== 'paused') return;
-  const roles = v.roles.map(r => r.role); if (!roles.length) { toast('Name a meat on a probe first (Start a cook does that).', 'bad'); return; }
+  const picks = v.tiles.map(r => ({ role: r.role || slugRole(r.name), name: r.name, pid: r.pid })), roles = picks.map(p => p.role); if (!roles.length) { toast('Plug in a thermometer first.', 'bad'); return; }
   const cur = v.plan.name === 'Cooking points' ? v.plan : null;
   const st = { follow: cur ? (cur.tracks.pit[0].until || {}).probe || roles[0] : roles[0], setTemp: v.pit.set || null, points: cur ? cur.tracks.pit.slice(1).map((s, i) => ({ at: cur.tracks.pit[i].until.at_least, set: s.set })) : [] };
-  const compose = () => composePlan({ setTemp: st.setTemp, meats: [{ probe: v.cook.probes[st.follow], name: st.follow }], points: st.points, follow: st.follow });
-  const body = () => `<label class="field"><span>Follow</span><select id="follow">${roles.map(r => `<option value="${esc(r)}"${r === st.follow ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></label>
+  const compose = () => composePlan({ setTemp: st.setTemp, meats: [{ probe: (picks.find(p => p.role === st.follow) || {}).pid, name: st.follow }], points: st.points, follow: st.follow });
+  const body = () => `<label class="field"><span>Follow</span><select id="follow">${picks.map(r => `<option value="${esc(r.role)}"${r.role === st.follow ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
     <div class="prows">${st.points.map((pt, i) => `<div class="prow"><span>when it hits</span><label class="field"><input data-p="${i}" data-k="at" type="number" inputmode="numeric" placeholder="165" value="${pt.at}"></label><span>smoker to</span><label class="field"><input data-p="${i}" data-k="set" type="number" inputmode="numeric" placeholder="250" value="${pt.set}"></label><button type="button" data-delp="${i}" aria-label="Remove">×</button></div>`).join('')}</div>
     <button type="button" class="add" id="add-point">Add a point</button><div id="start-check"></div>`;
   const check = sh => { const c = compose(); $('#start-check', sh).innerHTML = c.errors.length ? `<p class="refuse">${esc(c.errors.join(' '))}</p>` : st.points.length ? '<p class="okay">The points take over from the current setpoint; the meats keep their own lines.</p>' : '<p class="note">No points: the pit stays as it is.</p>'; $('#sheet-go', sh).disabled = c.errors.length > 0 || !st.points.filter(p => p.at && p.set).length; };
@@ -235,7 +218,7 @@ function openFullChart() {
   const ch = new PitChart($('.chart', el), { zoom: true, full: true }); const data = chartDataOf(v); ch.setData(data);
   const paintLegend = () => { $$('.legend button', el).forEach(b => b.classList.toggle('off', !!S.hidden[b.dataset.v])); ch.setData(chartDataOf(v)); };
   $$('.legend button', el).forEach(b => b.addEventListener('click', () => { S.hidden[b.dataset.v] = !S.hidden[b.dataset.v]; paintLegend(); }));
-  const table = () => { const rs = readingsOf(v); const every = rs.filter((r, i) => i % 5 === 0 || i === rs.length - 1); return `<table><tr><th>Time</th><th>Pit</th><th>Set</th>${v.roles.map(r => `<th>${esc(capFirst(r.role))}</th>`).join('')}</tr>${every.map(r => `<tr><td>${fmtClock(r.at)}</td><td>${r.pit == null ? '' : rnd(r.pit)}</td><td>${r.set || ''}</td>${v.roles.map(x => `<td>${r.probes[x.pid] == null ? '' : rnd(r.probes[x.pid])}</td>`).join('')}</tr>`).join('')}</table>`; };
+  const table = () => { const rs = readingsOf(v); const every = rs.filter((r, i) => i % 5 === 0 || i === rs.length - 1); return `<table><tr><th>Time</th><th>Pit</th><th>Set</th>${v.roles.map(r => `<th>${esc(capFirst(r.name))}</th>`).join('')}</tr>${every.map(r => `<tr><td>${fmtClock(r.at)}</td><td>${r.pit == null ? '' : rnd(r.pit)}</td><td>${r.set || ''}</td>${v.roles.map(x => `<td>${r.probes[x.pid] == null ? '' : rnd(r.probes[x.pid])}</td>`).join('')}</tr>`).join('')}</table>`; };
   $$('.fh button', el).forEach(b => b.addEventListener('click', () => {
     const w = b.dataset.w;
     if (w === 'close') { ch.destroy(); el.remove(); return; }
@@ -327,8 +310,9 @@ function archivePlan(id) {
 function onMainClick(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act, v = b.dataset.v;
-  if (act === 'start-cook') openNewCook();
-  else if (act === 'set-pit') openSetPit();
+  if (act === 'set-pit') openSetPit();
+  else if (act === 'tile') openThermo(v);
+  else if (act === 'go-plans') go('plans');
   else if (act === 'read-now') openReadNow();
   else if (act === 'expand') openFullChart();
   else if (act === 'legend') { S.hidden[v] = !S.hidden[v]; b.classList.toggle('off', !!S.hidden[v]); b.setAttribute('aria-pressed', String(!S.hidden[v])); if (S.chart && S.view) S.chart.setData(chartDataOf(S.view)); }
@@ -356,6 +340,6 @@ function onMainClick(e) {
 function onActionsClick(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act;
-  if (act === 'set') openSetPit(); else if (act === 'next') openNext(); else if (act === 'pause') placeOrder('pause'); else if (act === 'resume') openResume();
+  if (act === 'set') openSetPit(); else if (act === 'read-now') openReadNow(); else if (act === 'power') openPower(); else if (act === 'next') openNext(); else if (act === 'pause') placeOrder('pause'); else if (act === 'resume') openResume();
   else if (act === 'done') openDone(); else if (act === 'rested') openRested(); else if (act === 'end') openEnd();
 }

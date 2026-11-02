@@ -4,8 +4,10 @@
 'use strict';
 const CFG = window.PIT_CONFIG || {};
 const ENGINE = typeof PitEngine !== 'undefined' ? PitEngine : null;
-const APP_VERSION = '202611011945';
-const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // one per meat in the plan's order; the six checks pass on the panel
+const APP_VERSION = '202611020100';
+const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // the six checks pass on the panel
+const PORT_COLOR = { p1: 0, p2: 1, p3: 2, p0: 3 };                    // a colour stays with its port: pulling one out never repaints another
+const colorOf = pid => MEAT_COLORS[pid in PORT_COLOR ? PORT_COLOR[pid] : 3];
 const PIT_COLOR = '#E8632A', PANEL_COLOR = '#15100F', INK = '#F2EAE8', INK_DIM = '#9A8C8A', INK_FAINT = '#5E5250';
 const MINUTE = 60000, HOUR = 3600000;
 const STALE_MINUTES = ENGINE ? ENGINE.RULES.staleMinutes : 5;
@@ -33,7 +35,8 @@ const S = {
   mode: null,              // 'live' | 'demo'
   session: null, pit: null, plans: [],
   cook: null, readings: [], events: [],   // the live cook
-  last: null,              // the last reading with no cook
+  last: null,              // the newest reading
+  idle: null,              // no cook: the last session { cook, readings, events }, so the graph stays on screen
   history: [], histData: {},              // past cooks; id -> { readings, events }
   orders: [],              // his orders this session: { id, action, value, at, status }
   tab: 'now', sub: null, hidden: {},      // hidden: legend toggles
@@ -219,32 +222,48 @@ function marksOf(events, cook) {
   }
   return m;
 }
-function buildView(cook, readings, events, now) {
+// With no cook the screen is the same one: the newest reading on the tiles, the last session's graph under them.
+function idleCook() {
+  const c = S.idle ? S.idle.cook : null, t = S.last ? S.last.at : S.now();
+  return Object.assign({ id: 'idle', plan: { name: 'Cook', probes: [], tracks: { pit: [] } }, probes: {}, names: {}, startedAt: t, endedAt: t }, c || {},
+    { idle: true, status: 'idle', phase: 'idle', tracks: {}, timers: [], marks: [], alarms: {}, pending: null, failed: null, phaseAt: null, resting: [], rested: {} });
+}
+// newest: the reading the tiles show, when it isn't the last of these readings (no cook: the graph is the last session's).
+function buildView(cook, readings, events, now, newest) {
   const plan = cook.plan || { name: 'Cook', probes: [], tracks: { pit: [] } };
-  const last = readings.length ? readings[readings.length - 1] : null;
+  const last = newest || (readings.length ? readings[readings.length - 1] : null);
   const online = !!last && now - last.at <= STALE_MINUTES * MINUTE;
-  const roles = (plan.probes || []).filter(r => cook.probes && cook.probes[r]).map((role, i) => {
-    const pid = cook.probes[role], color = MEAT_COLORS[i % MEAT_COLORS.length];
-    const pts = readings.map(r => [r.at, r.probes ? r.probes[pid] : null]);
-    let li = pts.length - 1; while (li >= 0 && pts[li][1] == null) li--;
-    const lastPt = li >= 0 ? pts[li] : null, temp = lastPt ? lastPt[1] : null;
+  // Every thermometer this cook has seen: what the plan follows first, then the ports in order. Thermometers belong to
+  // the pit: one that reads shows, one that's pulled drops off the screen (its line stays on the graph).
+  const roleAt = pid => (plan.probes || []).find(r => cook.probes && cook.probes[r] === pid) || null;
+  const seen = (plan.probes || []).map(r => cook.probes && cook.probes[r]).filter(Boolean), found = new Set();
+  for (const r of readings.concat(last ? [last] : [])) for (const k of Object.keys(r.probes || {})) if (r.probes[k] != null) found.add(k);
+  for (const id of Array.from(found).sort()) if (!seen.includes(id)) seen.push(id);
+  const roles = seen.map(pid => {
+    const role = roleAt(pid), color = colorOf(pid), name = (cook.names || {})[pid] || (role ? role.replace(/_/g, ' ') : labelOf(pid));
+    const pts = readings.map(r => [r.at, r.probes ? r.probes[pid] : null]), reads = !!(last && last.probes && last.probes[pid] != null);
+    const tail = cook.idle && reads ? pts.concat([[last.at, last.probes[pid]]]) : pts;
+    let li = tail.length - 1; while (li >= 0 && tail[li][1] == null) li--;
+    const lastPt = li >= 0 ? tail[li] : null, temp = lastPt ? lastPt[1] : null;
     const stale = !!lastPt && now - lastPt[0] > 10 * MINUTE;
-    const rate = stale ? null : rateOf(pts, now), track = cook.tracks[role] || null, steps = plan.tracks[role] || [];
+    const rate = stale || cook.idle ? null : rateOf(pts, now), track = role ? cook.tracks[role] || null : null, steps = role ? plan.tracks[role] || [] : [];
     const step = track ? steps[track.step] || null : null;
     let until = step && step.until ? describeUntil(step.until, role, track, now) : null;
     // A meat with no track of its own shows the line the pit's step waits on ("until 197", "until the stall").
     const pitTrack = cook.tracks.pit, pitStepNow = pitTrack ? (plan.tracks.pit || [])[pitTrack.step] : null;
-    if (!until && !track && pitStepNow && pitStepNow.until && !('minutes' in pitStepNow.until) && cook.phase === 'cook') {
+    if (role && !until && !track && pitStepNow && pitStepNow.until && !('minutes' in pitStepNow.until) && cook.phase === 'cook') {
       const u = pitStepNow.until, waitsOn = 'stall' in u ? u.stall : u.probe;
       if (waitsOn === role) until = describeUntil(u, role, pitTrack, now);
     }
-    const ended = !!(track && track.ended) || (!track && cook.phase !== 'cook'), resting = cook.phase === 'rest' && (cook.resting || []).includes(role) && !(cook.rested || {})[role];
+    const ended = !!(track && track.ended) || (!track && cook.phase !== 'cook' && !cook.idle), resting = cook.phase === 'rest' && (cook.resting || []).includes(role) && !(cook.rested || {})[role];
     const stalled = cook.phase === 'cook' && temp != null && temp >= 150 && flatFor20(pts, now) && !ended;
     let pace = null;
     if (cook.phase === 'cook' && until && until.kind === 'at_least' && temp != null && until.value > temp && rate != null && rate >= 1.5 && now - cook.startedAt >= 30 * MINUTE) {
       const h = (until.value - temp) / rate; if (h <= 24) pace = { at: now + h * HOUR, value: until.value };
     }
-    return { role, pid, color, temp, stale, tempAt: lastPt ? lastPt[0] : null, rate, pts, track, steps, step, until, ended, resting, stalled, pace, spark: pts.filter(p => p[0] >= now - 60 * MINUTE && p[0] <= now) };
+    const mark = (cook.marks || []).find(m => m.pid === pid && !m.told) || null;
+    const shows = reads || resting || !!until || !!(track && !track.ended);    // pulled drops the tile, unless the plan is still on it
+    return { role, pid, name, color, temp, stale, tempAt: lastPt ? lastPt[0] : null, rate, pts, track, steps, step, until, ended, resting, stalled, pace, mark, shows, spark: pts.filter(p => p[0] >= now - 60 * MINUTE && p[0] <= now) };
   });
   const pitSteps = plan.tracks.pit || [], pt = cook.tracks.pit || { step: 0 }, pitStep = pitSteps[pt.step] || null;
   const pit = { temp: last ? last.pit : null, set: last ? last.set : null, heating: !!(last && last.heating), step: pitStep, idx: pt.step, next: pitSteps[pt.step + 1] || null,
@@ -254,13 +273,15 @@ function buildView(cook, readings, events, now) {
   const sensors = { online, lastHeard: last ? last.at : null, door: !sw.door ? 'off' : last && last.door ? 'open' : 'closed', lid: !sw.lid ? 'off' : last && last.lid ? 'open' : 'closed',
     power: last ? last.power : null, rssi: last ? last.rssi : null, errors: last ? last.errors : [], fah: last ? last.fah : null };
   const phase = cook.status === 'paused' ? 'paused' : cook.phase;
+  const hasPlan = !cook.idle && ((!cook.auto && plan.name !== 'Just watch') || cook.phase === 'rest' || cook.phase === 'hold');
   const doneEv = events.find(e => e.phase === 'rest' && /^Cook done/.test(e.text)), holdEv = events.find(e => e.phase === 'hold');
   const timers = (cook.timers || []).map(t => ({ name: t.name, minutes: t.minutes, at: tms(t.at), told: !!t.told, left: Math.max(0, (tms(t.at) - now) / MINUTE) }));
-  return { cook, plan, roles, pit, asks: openAsks(events, now), marks: marksOf(events, cook), sensors, phase, last, now, elapsed: now - cook.startedAt,
+  return { cook, plan, roles, tiles: roles.filter(r => r.shows), lines: roles.filter(r => r.pts.some(p => p[1] != null)), hasPlan, pit, asks: cook.idle ? [] : openAsks(events, now), marks: marksOf(events, cook), sensors, phase, last, now, elapsed: now - cook.startedAt,
     doneAt: doneEv ? doneEv.at : null, holdAt: holdEv ? holdEv.at : null, events, timers };
 }
 // The readings behind a view: the live cook's (up to now) on the Now tab, a past cook's whole set elsewhere.
 function readingsOf(v) {
+  if (v.cook.idle) return S.idle ? S.idle.readings : [];
   const live = S.cook && S.cook.id === v.cook.id && S.tab === 'now';
   return live ? S.readings : (S.histData[v.cook.id] || {}).readings || (S.cook && S.cook.id === v.cook.id ? S.readings : []);
 }
@@ -269,12 +290,12 @@ function chartDataOf(v) {
   const series = [
     { key: 'pit', label: 'Pit', color: PIT_COLOR, pts: readings.map(r => [r.at, r.pit]) },
     { key: 'set', label: 'Setpoint', color: PIT_COLOR, dash: true, step: true, alpha: .55, noLabel: true, pts: readings.map(r => [r.at, r.set || null]) },
-  ].concat(v.roles.map(r => ({ key: r.role, label: capFirst(r.role), color: r.color, pts: r.pts })));
+  ].concat(v.lines.map(r => ({ key: r.pid, label: capFirst(r.name), color: r.color, pts: r.pts })));
   const lastAt = readings.length ? readings[readings.length - 1].at : v.cook.startedAt;
   return { t0: v.cook.startedAt, t1: Math.max(lastAt, Math.min(v.now, v.cook.endedAt || v.now)), series, marks: v.marks, hidden: S.hidden };
 }
 function csvOf(readings, roles) {
-  const pids = roles.map(r => r.pid), head = ['time', 'pit', 'setpoint', 'heating', 'power', 'door_open', 'lid_open'].concat(roles.map(r => `${r.role} (${r.pid})`), ['rssi', 'errors']);
+  const pids = roles.map(r => r.pid), head = ['time', 'pit', 'setpoint', 'heating', 'power', 'door_open', 'lid_open'].concat(roles.map(r => `${r.name} (${r.pid})`), ['rssi', 'errors']);
   const rows = readings.map(r => [new Date(r.at).toISOString(), r.pit, r.set, r.heating ? 1 : 0, r.power ? 1 : 0, r.door ? 1 : 0, r.lid ? 1 : 0].concat(pids.map(p => r.probes[p] == null ? '' : r.probes[p]), [r.rssi == null ? '' : r.rssi, (r.errors || []).join(' ')]));
   return [head].concat(rows).map(r => r.join(',')).join('\n');
 }
@@ -283,11 +304,12 @@ function csvOf(readings, roles) {
 // The smoker's ports today: its shadow numbers them from 1, like its panel (p1 = Probe 1; it has never reported a p0).
 // A wireless thermometer later: its driver lists its ids in pits.probes and writes them into readings.probes; anything
 // reading a number shows up here too.
+function portList() { return S.pit && Array.isArray(S.pit.probes) && S.pit.probes.length ? S.pit.probes.map(p => ({ id: p.id, label: p.label || p.id })) : [1, 2, 3].map(i => ({ id: 'p' + i, label: 'Probe ' + i })); }
+function labelOf(pid) { const p = portList().find(x => x.id === pid); return p ? p.label : String(pid).toUpperCase(); }
 function probeSources() {
-  const list = S.pit && Array.isArray(S.pit.probes) && S.pit.probes.length ? S.pit.probes.map(p => ({ id: p.id, label: p.label || p.id })) : [1, 2, 3].map(i => ({ id: 'p' + i, label: 'Probe ' + i }));
-  const seen = S.cook ? (S.readings[S.readings.length - 1] || {}).probes : (S.last || {}).probes;
+  const list = portList(), seen = S.cook ? (S.readings[S.readings.length - 1] || {}).probes : (S.last || {}).probes, names = (S.cook && S.cook.names) || {};
   for (const id of Object.keys(seen || {})) if (seen[id] != null && !list.some(p => p.id === id)) list.push({ id, label: id.toUpperCase() });
-  return list;
+  return list.map(p => names[p.id] ? { id: p.id, label: names[p.id] } : p);
 }
 const slugRole = name => String(name || '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^[_0-9]+|_+$/g, '');
 // meats: [{ probe, name, target }] (a name makes it a meat; a target makes the engine tell him);

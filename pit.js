@@ -21,14 +21,14 @@ async function onSignIn(e) {
   catch (ex) { msg.textContent = ex.message; msg.hidden = false; }
   btn.disabled = false; btn.textContent = 'Sign in';
 }
-function signOutToGate() { sb.signOut(); S.cook = null; S.readings = []; S.events = []; S.last = null; S.history = []; S.histData = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; showGate(); }
+function signOutToGate() { sb.signOut(); S.cook = null; S.readings = []; S.events = []; S.last = null; S.idle = null; S.history = []; S.histData = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; showGate(); }
 
 // ---- live -----------------------------------------------------------------------------------------------------
 async function enterLive() {
   S.mode = 'live'; S.now = () => Date.now(); $('#gate').hidden = true; $('#app').hidden = false; $('#demobar').hidden = true;
   try { await loadLive(); }
   catch (e) { if (/Signed out|expired|Not signed in/.test(e.message)) { showGate(); const m = $('#signin-err'); m.textContent = e.message; m.hidden = false; return; } toast('Could not read the notebook: ' + e.message, 'bad', 8000); }
-  renderAll(); startPolling(); pushSync();
+  renderAll(); startPolling(); pushSync(); lookOnOpen();
   if (S.tab === 'plans') loadPlans().then(renderAll).catch(err); if (S.tab === 'history') loadHistory().then(renderAll).catch(err);
 }
 async function loadLive() {
@@ -51,7 +51,24 @@ async function loadHistData(id) {
   } catch (e) { toast('Could not load that cook: ' + e.message, 'bad'); }
   return S.histData[id];
 }
-const signature = () => JSON.stringify([S.cook && [S.cook.id, S.cook.status, S.cook.phase, S.cook.pending, S.cook.failed], S.readings.length, S.events.length, S.last && S.last.at, S.pit && S.pit.alerts, S.tab, S.sub]);
+const signature = () => JSON.stringify([S.cook && [S.cook.id, S.cook.status, S.cook.phase, S.cook.pending, S.cook.failed, S.cook.names, S.cook.marks, S.cook.probes], S.readings.length, S.events.length, S.last && [S.last.at, S.last.power], S.idle && S.idle.cook.id, S.pit && S.pit.alerts, S.tab, S.sub]);
+// The last session, so the screen keeps its graph with the smoker off. A refused start has no plan and no readings.
+async function loadIdle() {
+  const rows = await sb.get('cooks?status=in.(done,stopped)&order=started_at.desc&limit=5&select=id,pit_id,plan_id,meat,weight_lb,status,state,started_at,ended_at,notes,rating');
+  const row = rows.find(r => r.state && r.state.plan); if (!row) { S.idle = null; return; }
+  if (S.idle && S.idle.cook.id === row.id) return;
+  const d = await loadHistData(row.id); if (d) S.idle = { cook: normCook(row), readings: d.readings, events: d.events };
+}
+// No session: nothing reads the smoker between cooks (the live part is parked), so opening The Pit is the look: one read,
+// one n8n run, at most one in 10 minutes across every screen. A read that finds the smoker on opens the session (the Door).
+async function lookOnOpen() {
+  if (S.mode !== 'live' || S.cook || !S.pit || document.visibilityState !== 'visible') return;
+  try {
+    const rows = await sb.get('orders?action=eq.read&order=at.desc&limit=1&select=at');
+    if (rows[0] && Date.now() - tms(rows[0].at) < 10 * MINUTE) return;
+    await placeOrder('read', undefined, { quiet: true });
+  } catch (e) { /* the screen still shows the last look */ }
+}
 async function refreshLive(full) {
   if (S.mode !== 'live' || S.busy) return;
   S.busy = true; const before = signature();
@@ -67,9 +84,12 @@ async function refreshLive(full) {
         sb.get(`events?cook_id=eq.${row.id}&order=at.asc,id.asc&select=${EVENT_COLS}${lastId != null ? `&id=gt.${lastId}` : ''}`)]);
       if (rs.length) S.readings = S.readings.concat(rs.map(normReading));
       if (es.length) S.events = S.events.concat(es.map(normEvent).filter(Boolean));
+      S.last = S.readings[S.readings.length - 1] || S.last;
     } else {
+      const ended = !!S.cook;
       if (S.cook) { S.cook = null; S.readings = []; S.events = []; S.historyAt = 0; }
       const last = await sb.get(`readings?order=at.desc&limit=1&select=${READING_COLS}`); S.last = last[0] ? normReading(last[0]) : null;
+      if (ended || full || !S.idle) await loadIdle();
     }
     if (full || Date.now() - (S.pitAt || 0) > 5 * MINUTE) { const pits = await sb.get('pits?select=id,name,range_min,range_max,alerts&order=created_at.asc&limit=1'); if (pits[0]) S.pit = pits[0]; S.pitAt = Date.now(); }
     S.error = null;
@@ -94,29 +114,39 @@ function stopPolling() { clearTimeout(S.timer); S.timer = null; }
 // ---- the sample cooks -----------------------------------------------------------------------------------------
 async function enterDemo(which, atMinutes) {
   stopPolling(); $('#gate').hidden = true; $('#app').hidden = false;
-  S.mode = 'demo'; DEMO.which = DEMO.files[which] || which === 'empty' ? which : 'brisket'; DEMO.t = null;
+  S.mode = 'demo'; DEMO.which = DEMO.files[which] || which === 'empty' || which === 'open' ? which : 'brisket'; DEMO.t = null;
   try { await loadDemoData(); } catch (e) { toast('Could not load the sample cooks: ' + e.message, 'bad', 8000); return; }
   S.plans = DEMO.planRows.slice(); S.plansAt = Date.now(); S.historyAt = Date.now(); S.hidden = {};
   if (atMinutes != null && DEMO.data[DEMO.which]) DEMO.t = DEMO.data[DEMO.which].t0 + atMinutes * MINUTE;
   applyDemo(); if (!S.ageTimer) S.ageTimer = setInterval(tickAges, 10000); if (!S.verTimer) S.verTimer = setInterval(checkVersion, 60000);
   renderAll();
 }
+// The sample cooks have one thermometer: more, for the screens that show several.
+function plugExtra(readings, n) { return readings.map(r => { const base = Object.values(r.probes).find(v => v != null) || 70, probes = Object.assign({}, r.probes); if (n > 0) probes.p2 = Math.round(base * 0.94); if (n > 1) probes.p3 = Math.round(base * 0.88); return Object.assign({}, r, { probes }); }); }
 function applyDemo() {
   S.history = Object.values(DEMO.data).map(x => Object.assign(demoCookAt(x, x.tEnd), { status: 'done', endedAt: x.tEnd })).sort((a, b) => b.startedAt - a.startedAt);
   for (const x of Object.values(DEMO.data)) S.histData['demo-' + x.key] = { readings: x.readings, events: x.events };
-  const d = DEMO.data[DEMO.which];
-  if (!d) {   // "no cook running": the smoker as it was at the end of the brisket, read ten minutes ago
+  const d = DEMO.data[DEMO.which], extra = +new URLSearchParams(location.search).get('plug') || 0;
+  if (DEMO.which === 'open') {   // a session with no plan: the smoker on, three thermometers seen, the third pulled out again
+    const b = DEMO.data.brisket, t = b.t0 + 6 * HOUR, rs = plugExtra(b.readings, 2).filter(r => r.at <= t).map(r => Object.assign({}, r, { probes: { p1: r.probes.p0, p2: r.probes.p2, p3: r.at < b.t0 + 4 * HOUR && r.at > b.t0 + 2 * HOUR ? r.probes.p3 : null } }));
+    S.now = () => t; S.readings = rs; S.events = []; S.last = rs[rs.length - 1];
+    S.cook = { id: 'demo-open', status: 'running', auto: true, plan: JSON.parse(JSON.stringify(ENGINE.WATCH_PLAN)), probes: {}, names: {}, marks: [], tracks: { pit: { step: 0, since: b.t0 } }, phase: 'cook', phaseAt: b.t0, startedAt: b.t0, endedAt: null, resting: [], rested: {}, restSet: null, pending: null, failed: null, alarms: {}, timers: [], meat: null, weightLb: null, notes: '', rating: null, runnerUrl: null, demo: true };
+    return;
+  }
+  if (!d) {   // no session: the smoker off, read a moment ago, the last cook's graph still on screen
     const b = DEMO.data.brisket, last = b.readings[b.readings.length - 1], now = Date.now();
-    S.cook = null; S.readings = []; S.events = []; S.now = () => now; S.last = Object.assign({}, last, { at: now - 40 * 1000, set: 0, heating: false, probes: { p1: 71.5 } });
+    S.cook = null; S.readings = []; S.events = []; S.now = () => now; S.last = Object.assign({}, last, { at: now - 40 * 1000, set: 0, heating: false, power: false, probes: { p1: 71.5 } });
+    S.idle = { cook: S.history.find(h => h.id === 'demo-brisket'), readings: b.readings, events: b.events };
     return;
   }
   if (DEMO.t == null) DEMO.t = d.tDone ? d.tDone - 2 * HOUR : d.t0 + (d.tEnd - d.t0) * 0.7;
   DEMO.t = Math.min(d.tEnd, Math.max(d.t0 + 5 * MINUTE, DEMO.t));
   const t = DEMO.t; S.now = () => t;
-  S.cook = demoCookAt(d, t); S.readings = d.readings.filter(r => r.at <= t); S.events = d.events.filter(e => e.at <= t);
+  const rs = extra ? plugExtra(d.readings, extra) : d.readings;
+  S.cook = demoCookAt(d, t); S.readings = rs.filter(r => r.at <= t); S.events = d.events.filter(e => e.at <= t);
   S.last = S.readings[S.readings.length - 1] || null;
 }
-function leaveDemo() { S.mode = null; S.cook = null; S.readings = []; S.events = []; S.last = null; S.history = []; S.histData = {}; S.hidden = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; S.now = () => Date.now(); $('#demobar').hidden = true; if (S.session) enterLive(); else showGate(); }
+function leaveDemo() { S.mode = null; S.cook = null; S.readings = []; S.events = []; S.last = null; S.idle = null; S.history = []; S.histData = {}; S.hidden = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; S.now = () => Date.now(); $('#demobar').hidden = true; if (S.session) enterLive(); else showGate(); }
 
 // ---- boot -----------------------------------------------------------------------------------------------------
 function boot() {
@@ -129,7 +159,8 @@ function boot() {
   $('#actions').addEventListener('click', onActionsClick);
   $('#strip').addEventListener('click', () => go('now'));
   window.addEventListener('hashchange', onHash);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode === 'live') refreshLive(false); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode === 'live') refreshLive(false).then(lookOnOpen); });
+  $('#main').addEventListener('keydown', e => { const t = e.target; if ((e.key === 'Enter' || e.key === ' ') && t.dataset && t.dataset.act === 'tile') { e.preventDefault(); t.click(); } });
   let wasWide = wideScreen();
   window.addEventListener('resize', () => { const w = wideScreen(); if (w !== wasWide) { wasWide = w; renderAll(); } });
   readHash(); pushInit();

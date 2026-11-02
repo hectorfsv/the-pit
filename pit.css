@@ -140,6 +140,21 @@ a{color:inherit;text-decoration:none}
 .meat .spark{width:96px;height:30px;flex:none}
 .meat .age{font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
 .meat .resting{font-size:12.5px;color:var(--m1)}
+.meat[data-act]{cursor:pointer;transition:transform .12s}
+.meat[data-act]:active{transform:scale(.985)}
+/* thermometers side by side: what's plugged in, as many as there are */
+.tiles{display:grid;gap:14px;min-width:0}
+.tiles.many{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.tiles.n3 .meat:last-child{grid-column:1/-1}
+.tiles.many .meat{padding:12px 12px 10px 16px}
+.tiles.many .meat .role{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tiles.many .meat .stepname,.tiles.many .meat .track{display:none}
+.tiles.many .meat .big{flex-direction:column;align-items:flex-start;gap:6px}
+.tiles.many .meat .temp{font-size:56px}
+.tiles.many .meat .temp.none{font-size:24px}
+.tiles.many .meat .right{text-align:left;justify-items:start;padding-bottom:0}
+.tiles.many .meat .line{font-size:13.5px}
+.tiles.many .meat .foot{margin-top:6px;justify-content:flex-end}
 .pit{background:linear-gradient(180deg,var(--panel-hi),var(--panel));border-radius:var(--radius);padding:14px 16px 12px;border-top:1px solid var(--rule-hot)}
 .pit .head{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .pit .role{font-weight:600;font-size:15px}
@@ -166,6 +181,7 @@ a{color:inherit;text-decoration:none}
 
 /* the graph */
 .graph{background:var(--panel);border-radius:var(--radius);padding:12px 6px 6px}
+.graph .gwhen{font-size:12.5px;color:var(--ink-dim);padding:0 12px 6px}
 .graph .ghead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 10px 6px}
 .legend{display:flex;gap:6px;flex-wrap:wrap}
 .legend button{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-dim);padding:3px 8px;border-radius:999px;border:1px solid transparent}
@@ -203,6 +219,8 @@ a{color:inherit;text-decoration:none}
 .steps li .until{font-weight:400;color:inherit;opacity:.85}
 .steps li .at{font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
 
+.thermo{display:grid;gap:12px}
+
 /* log */
 .log ul{list-style:none;display:grid}
 .log li{display:grid;grid-template-columns:62px 1fr;gap:10px;padding:8px 2px;border-top:1px solid var(--rule);font-size:13.5px;line-height:1.4}
@@ -225,19 +243,6 @@ a{color:inherit;text-decoration:none}
 .sensors .bars i{width:3px;background:var(--ink-faint);border-radius:1px}
 .sensors .bars i.on{background:var(--go)}
 .sensors .pw{margin-left:auto}
-
-/* empty states */
-.empty-cook{display:grid;gap:14px;padding-top:6px}
-.empty-cook .hero{background:var(--panel);border-radius:var(--radius);padding:18px 16px}
-.empty-cook h2{font-size:22px;font-weight:600}
-.empty-cook p{color:var(--ink-dim);margin-top:4px;font-size:14.5px}
-.lastread{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:14px}
-.lastread .v{background:var(--panel-lo);border-radius:10px;padding:10px 12px}
-.lastread .v .k{font-size:11.5px;color:var(--ink-dim)}
-.lastread .v .n{font-family:var(--num);font-size:34px;line-height:1;margin-top:2px}
-.lastread .v .n.dim{color:var(--ink-faint);font-family:var(--disp);font-size:14px;font-weight:500;line-height:1.5}
-.empty-cook .go{display:grid;gap:10px;grid-template-columns:1fr auto}
-.empty-cook .go .btn.primary{min-height:54px;font-size:16px}
 
 /* ---- plans ---- */
 .plans{display:grid;gap:12px}
@@ -476,7 +481,3 @@ details.sub[open] summary::after{transform:rotate(-135deg)}
 details.sub summary .dim{font-weight:400;font-size:13px}
 details.sub>*:not(summary){margin-bottom:12px}
 
-.empty-cook .go.two{grid-template-columns:auto 1fr;align-items:center}
-
-.empty-cook .go.three{grid-template-columns:auto auto 1fr;align-items:center}
-@media (max-width:420px){.empty-cook .go.three{grid-template-columns:1fr 1fr}.empty-cook .go.three .note{grid-column:1/-1}}
