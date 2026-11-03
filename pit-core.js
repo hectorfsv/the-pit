@@ -8,7 +8,7 @@ const ENGINE = typeof PitEngine !== 'undefined' ? PitEngine : null;
 // and Select as Enter; only html.tv and the lines behind TV change anything, so the phone never sees any of it.
 const TV = /\bAFT[A-Z0-9]/.test(navigator.userAgent) || /[?&]tv=1\b/.test(location.search);
 if (TV) document.documentElement.classList.add('tv');
-const APP_VERSION = '202611020400';
+const APP_VERSION = '202611031600';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // the six checks pass on the panel
 const PORT_COLOR = { p1: 0, p2: 1, p3: 2, p0: 3 };                    // a colour stays with its port: pulling one out never repaints another
 const colorOf = pid => MEAT_COLORS[pid in PORT_COLOR ? PORT_COLOR[pid] : 3];
@@ -47,7 +47,12 @@ const S = {
   tab: 'now', sub: null, hidden: {},      // hidden: legend toggles
   now: () => Date.now(),   // the demo moves this
   view: null, chart: null, timer: null, fastUntil: 0, busy: false,
+  live: null, liveTimer: null, liveBusy: false, liveShape: null,   // the live row: { reading, gotAt }
 };
+// The live row (the notebook's listener, pit-listen, writes every report the smoker pushes, ~every 7 s) is the smoker
+// now while it is fresh. Stale, the screen falls back to the 2-minute readings by itself: a hand-over can drop one report.
+const LIVE_FRESH = 30 * 1000;
+const liveReading = () => S.live && Date.now() - S.live.gotAt <= LIVE_FRESH ? S.live.reading : null;
 
 // ---- the notebook -----------------------------------------------------------------------------------------
 const sb = {
@@ -246,7 +251,7 @@ function buildView(cook, readings, events, now, newest) {
   const roles = seen.map(pid => {
     const role = roleAt(pid), color = colorOf(pid), name = (cook.names || {})[pid] || (role ? role.replace(/_/g, ' ') : labelOf(pid));
     const pts = readings.map(r => [r.at, r.probes ? r.probes[pid] : null]), reads = !!(last && last.probes && last.probes[pid] != null);
-    const tail = cook.idle && reads ? pts.concat([[last.at, last.probes[pid]]]) : pts;
+    const tail = (cook.idle || (last && last.live)) && reads ? pts.concat([[last.at, last.probes[pid]]]) : pts;   // live: the number now, the line keeps its 2-minute points
     let li = tail.length - 1; while (li >= 0 && tail[li][1] == null) li--;
     const lastPt = li >= 0 ? tail[li] : null, temp = lastPt ? lastPt[1] : null;
     const stale = !!lastPt && now - lastPt[0] > 10 * MINUTE;
@@ -267,7 +272,8 @@ function buildView(cook, readings, events, now, newest) {
     }
     const mark = (cook.marks || []).find(m => m.pid === pid && !m.told) || null;
     const shows = reads || resting || !!until || !!(track && !track.ended);    // pulled drops the tile, unless the plan is still on it
-    return { role, pid, name, color, temp, stale, tempAt: lastPt ? lastPt[0] : null, rate, pts, track, steps, step, until, ended, resting, stalled, pace, mark, shows, spark: pts.filter(p => p[0] >= now - 60 * MINUTE && p[0] <= now) };
+    const live = !!(last && last.live && lastPt && lastPt[0] === last.at);
+    return { role, pid, name, color, temp, stale, live, tempAt: lastPt ? lastPt[0] : null, rate, pts, track, steps, step, until, ended, resting, stalled, pace, mark, shows, spark: pts.filter(p => p[0] >= now - 60 * MINUTE && p[0] <= now) };
   });
   const pitSteps = plan.tracks.pit || [], pt = cook.tracks.pit || { step: 0 }, pitStep = pitSteps[pt.step] || null;
   const pit = { temp: last ? last.pit : null, set: last ? last.set : null, heating: !!(last && last.heating), step: pitStep, idx: pt.step, next: pitSteps[pt.step + 1] || null,
@@ -311,7 +317,7 @@ function csvOf(readings, roles) {
 function portList() { return S.pit && Array.isArray(S.pit.probes) && S.pit.probes.length ? S.pit.probes.map(p => ({ id: p.id, label: p.label || p.id })) : [1, 2, 3].map(i => ({ id: 'p' + i, label: 'Probe ' + i })); }
 function labelOf(pid) { const p = portList().find(x => x.id === pid); return p ? p.label : /^m\d+$/.test(pid) ? (pid === 'm1' ? 'Meater' : 'Meater ' + pid.slice(1)) : String(pid).toUpperCase(); }
 function probeSources() {
-  const list = portList(), seen = S.cook ? (S.readings[S.readings.length - 1] || {}).probes : (S.last || {}).probes, names = (S.cook && S.cook.names) || {};
+  const live = liveReading(), list = portList(), seen = live ? live.probes : S.cook ? (S.readings[S.readings.length - 1] || {}).probes : (S.last || {}).probes, names = (S.cook && S.cook.names) || {};
   for (const id of Object.keys(seen || {})) if (seen[id] != null && !list.some(p => p.id === id)) list.push({ id, label: labelOf(id) });
   return list.map(p => names[p.id] ? { id: p.id, label: names[p.id] } : p);
 }

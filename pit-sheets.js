@@ -156,7 +156,7 @@ const TIMER_PRESETS = [0, 30, 45, 60, 90, 120];
 function smokerNowHTML(last) {
   if (!last) return '<div class="nowbox"><div class="k">The smoker now</div><div class="dim">no reading yet</div></div>';
   const probes = probeSources().map(p => `<span>${esc(p.label)} <b>${last.probes && last.probes[p.id] != null ? rnd(last.probes[p.id]) + '°' : '—'}</b></span>`).join('');
-  return `<div class="nowbox"><div class="k">The smoker now, looked <span data-age="${last.at}">${fmtAgo(last.at, S.now())}</span></div><div class="big">${last.pit == null ? '—' : rnd(last.pit) + '°'}<span>${last.set ? `set ${last.set}` : 'no setpoint'}${last.heating ? ', heating' : ''}</span></div><div class="pnow">${probes}</div></div>`;
+  return `<div class="nowbox"><div class="k">The smoker now, ${last.live ? 'live' : `looked <span data-age="${last.at}">${fmtAgo(last.at, S.now())}</span>`}</div><div class="big">${last.pit == null ? '—' : rnd(last.pit) + '°'}<span>${last.set ? `set ${last.set}` : 'no setpoint'}${last.heating ? ', heating' : ''}</span></div><div class="pnow">${probes}</div></div>`;
 }
 function presetsHTML(name, values, current, unit, zero) {
   return `<div class="presets" data-presets="${name}">${values.map(v => `<button type="button" data-v="${v}" class="${(current || 0) === v ? 'on' : ''}">${v === 0 ? zero : v + unit}</button>`).join('')}</div>`;
@@ -182,14 +182,14 @@ function openThermo(pid) {
 }
 // A plan from the Plans tab: which thermometer follows it (one per meat), then Run, or use it on the running cook.
 function assignHTML(row, current) {
-  const src = probeSources(), last = S.last || (S.view && S.view.last) || null;
+  const src = probeSources(), last = liveReading() || S.last || (S.view && S.view.last) || null;
   const live = src.filter(p => last && last.probes && last.probes[p.id] != null);   // the first pick is a probe that reads, never an empty port
   return `<div class="assign">${(row.plan.probes || []).map((r, i) => `<div class="a"><div class="r" style="--c:${MEAT_COLORS[i % 4]}"><i></i>${esc(r)}</div><label class="field"><select data-role="${esc(r)}"><option value="">no thermometer</option>${src.map(p => `<option value="${esc(p.id)}"${(current && current[r] === p.id) || (!(current && current[r]) && p === (live.length ? live[i] : src[i])) ? ' selected' : ''}>${esc(p.label)}${last && last.probes && last.probes[p.id] != null ? `, ${rnd(last.probes[p.id])}°` : ''}</option>`).join('')}</select></label></div>`).join('')}</div>`;
 }
 const readAssign = sh => { const probes = {}; $$('select[data-role]', sh).forEach(x => { if (x.value) probes[x.dataset.role] = x.value; }); return probes; };
 function openStartPlan(row) {
   if (!row) return;
-  const last = S.last || (S.view && S.view.last) || null; let timer = 0;
+  const last = liveReading() || S.last || (S.view && S.view.last) || null; let timer = 0;
   confirmSheet({ title: `Run: ${row.plan.name}`, sub: planSummary(row.plan), label: 'Run this plan', full: true, disabled: refusals(last).length > 0,
     body: `${smokerNowHTML(last)}${(row.plan.probes || []).length ? `<div class="note">${followWords(row)}</div>${assignHTML(row)}` : ''}<details class="bs sub"><summary>Timer<span class="dim">optional</span></summary>${presetsHTML('timer', TIMER_PRESETS, 0, ' min', 'none')}</details>${refusals(last).length ? `<p class="refuse">${esc(refusals(last).join(' '))}</p>` : '<p class="okay">The smoker is on, in °F and online. The plan freezes as it is now.</p>'}`,
     onOpen: sh => $$('[data-presets=timer] button', sh).forEach(b => b.addEventListener('click', () => { timer = +b.dataset.v; $$('[data-presets=timer] button', sh).forEach(x => x.classList.toggle('on', x === b)); })),

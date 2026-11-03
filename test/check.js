@@ -141,6 +141,46 @@ const SCENARIOS = [
   { name: 'sheet-use-plan', url: 'index.html?demo=brisket#plans/demo-fiesta-style', vps: ['phone-956'], before: async p => { await p.click('[data-act=use-plan]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if ((await p.evaluate(count, 'select[data-role]')) !== 2) f.push('Fiesta needs two probe pickers on the running cook'); if (!/Use this plan now/.test(await p.evaluate(text, '#sheet-go') || '')) f.push('no hold button to use the plan'); return f; } },
   { name: 'sheet-points', url: 'index.html?demo=brisket#now', vps: ['phone-956'], before: async p => { await p.click('[data-act=points]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if (!(await p.evaluate(count, '#follow'))) f.push('no meat to follow'); await p.click('#add-point'); await p.fill('[data-p="0"][data-k=at]', '190'); await p.fill('[data-p="0"][data-k=set]', '300'); await p.waitForTimeout(150); if (await p.evaluate(() => document.querySelector('#sheet-go').disabled)) f.push(`a valid point leaves the button disabled: ${await p.evaluate(text, '#start-check')}`); return f; } },
   { name: 'sheet-timer', url: 'index.html?demo=brisket#now', vps: ['phone-956'], before: async p => { await p.click('[data-act=timer]'); await p.waitForSelector('.overlay.in .sheet'); }, check: async p => { const f = []; if (!(await p.evaluate(count, '#timer-min'))) f.push('no minutes field'); if ((await p.evaluate(count, '[data-presets=timer] button')) < 5) f.push('no timer presets'); return f; } },
+  // Live (11-03): the listener's row, fed the way the poller feeds it. A report changes the numbers in place (the graph
+  // canvas must be the same element after it); a plugged thermometer redraws; a stale row falls back to the readings.
+  { name: 'live-cook', url: 'index.html?demo=brisket#now', vps: ['phone-700', 'phone-956', 'tablet', 'desktop'], before: async p => {
+    await p.evaluate(() => { window.__chart = document.querySelector('#chart canvas'); window.__live = r => applyLive(Object.assign({ at: new Date(S.now()).toISOString(), got_at: new Date().toISOString(), setpoint: S.readings[S.readings.length - 1].set, heating: true, power: true, fah: true, lid_open: false, door_open: false, errors: [0, 0, 0, 0, 0], rssi: -52, probes: Object.assign({}, S.readings[S.readings.length - 1].probes) }, r)); });
+    await p.evaluate(() => { const k = Object.keys(S.readings[S.readings.length - 1].probes).find(x => S.readings[S.readings.length - 1].probes[x] != null); window.__pid = k; __live({ pit: 241, probes: Object.assign({}, S.readings[S.readings.length - 1].probes, { [k]: 175 }) }); }); }, check: async p => { const f = [];
+    if (((await p.evaluate(text, '.pit .temp')) || '').replace(/\s/g, '') !== '241°F') f.push(`the Pit tile reads "${await p.evaluate(text, '.pit .temp')}", not the live 241°F`);
+    if (!/live/.test(await p.evaluate(text, '.pit .stepname') || '')) f.push('the Pit tile does not say live');
+    if (((await p.evaluate(() => document.querySelector(`.meat[data-pid="${__pid}"] .temp`).textContent)) || '').replace(/\s/g, '') !== '175°F') f.push('the meat tile is not the live 175°F');
+    await p.evaluate(() => { window.__chart = document.querySelector('#chart canvas'); });   // live starting redraws once, for the label
+    await p.evaluate(() => __live({ pit: 242, heating: false, probes: Object.assign({}, S.readings[S.readings.length - 1].probes, { [__pid]: 176 }) }));
+    if (((await p.evaluate(text, '.pit .temp')) || '').replace(/\s/g, '') !== '242°F') f.push('the second report did not reach the Pit tile');
+    if (!/holding/.test(await p.evaluate(text, '.pit .heat') || '')) f.push('heating did not turn to holding in place');
+    if (!(await p.evaluate(() => document.querySelector('#chart canvas') === __chart))) f.push('a live report redrew the graph');
+    return f; } },
+  { name: 'live-plug', url: 'index.html?demo=brisket#now', vps: ['phone-956', 'desktop'], before: async p => {
+    await p.evaluate(() => { window.__n = document.querySelectorAll('.meat').length; const l = S.readings[S.readings.length - 1]; applyLive({ at: new Date(S.now()).toISOString(), got_at: new Date().toISOString(), pit: 230, setpoint: l.set, heating: true, power: true, fah: true, lid_open: false, door_open: false, errors: [], rssi: -50, probes: Object.assign({}, l.probes, { p3: 151 }) }); }); }, check: async p => { const f = [];
+    if ((await p.evaluate(count, '.meat')) !== (await p.evaluate(() => __n)) + 1) f.push('a thermometer plugged in live has no tile');
+    if (!/151/.test(await p.evaluate(text, '.meat[data-pid=p3] .temp') || '')) f.push('the new tile does not read 151');
+    return f; } },
+  { name: 'live-stale', url: 'index.html?demo=brisket#now', vps: ['phone-956'], before: async p => {
+    await p.evaluate(() => { window.__pit = document.querySelector('.pit .temp').textContent; const l = S.readings[S.readings.length - 1]; applyLive({ at: new Date(S.now()).toISOString(), got_at: new Date(Date.now() - 2 * 60000).toISOString(), pit: 299, setpoint: l.set, heating: true, power: true, fah: true, probes: l.probes, errors: [], rssi: -50 }); }); }, check: async p => { const f = [];
+    if (/live/.test(await p.evaluate(text, '.pit .stepname') || '')) f.push('a row two minutes old still says live');
+    if ((await p.evaluate(text, '.pit .temp')) !== (await p.evaluate(() => __pit))) f.push('a stale row reached the Pit tile');
+    return f; } },
+  { name: 'live-idle', url: 'index.html?demo=empty#now', vps: ['phone-956', 'desktop'], before: async p => {
+    await p.evaluate(() => applyLive({ at: new Date().toISOString(), got_at: new Date().toISOString(), pit: 188, setpoint: 225, heating: true, power: true, fah: true, lid_open: false, door_open: false, probes: { p0: null, p1: 66, p2: null, p3: null }, errors: [0, 0, 0, 0, 0], rssi: -48 })); }, check: async p => { const f = [];
+    if (((await p.evaluate(text, '.pit .temp')) || '').replace(/\s/g, '') !== '188°F') f.push('the smoker alone does not show the live 188°F');
+    if (/smoker off/.test(await p.evaluate(text, '.pit .heat') || '')) f.push('the live row says on, the tile says off');
+    if (!/Set temp 225/.test(await p.evaluate(text, '.pit .set-temp') || '')) f.push('Set temp does not carry the live setpoint');
+    if (!/live/.test(await p.evaluate(text, '.meat .age') || '')) f.push('the thermometer does not say live');
+    if (!/Power off/.test(await p.evaluate(text, '#actions') || '')) f.push('the bar does not offer Power off with the smoker on');
+    return f; } },
+  { name: 'live-tv', url: 'index.html?demo=brisket&tv=1#now', vps: ['tv'], before: async p => { await noBar(p); await p.waitForTimeout(150);
+    await p.evaluate(() => { document.querySelector('.pit .set-temp').focus(); window.__chart = document.querySelector('#chart canvas'); const l = S.readings[S.readings.length - 1];
+      for (const [pit, heating] of [[233, true], [234, false], [235, true]]) { if (pit === 234) window.__chart = document.querySelector('#chart canvas'); applyLive({ at: new Date(S.now()).toISOString(), got_at: new Date().toISOString(), pit, setpoint: l.set, heating, power: true, fah: true, lid_open: false, door_open: false, probes: l.probes, errors: [], rssi: -50 }); } }); }, check: async p => { const f = [];
+    if (!(await p.evaluate(() => document.activeElement && document.activeElement.matches('.pit .set-temp')))) f.push('three live reports moved the ring off Set temp');
+    if (((await p.evaluate(text, '.pit .temp')) || '').replace(/\s/g, '') !== '235°F') f.push('the TV does not show the live 235°F');
+    if (!(await p.evaluate(() => document.querySelector('#chart canvas') === __chart))) f.push('live redrew the graph on the TV');
+    f.push(...await tvFits(p, ['.pit', '.meat', '.chart']));
+    return f; } },
   { name: 'tv-cook', before: noBar, url: 'index.html?demo=brisket&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },
   { name: 'tv-ribs', before: noBar, url: 'index.html?demo=ribs-chicken&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },
   { name: 'tv-open', before: noBar, url: 'index.html?demo=open&plug=3&tv=1#now', vps: ['tv'], check: async p => tvFits(p, ['.pit', '.meat', '.chart']) },

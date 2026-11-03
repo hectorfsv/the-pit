@@ -1,5 +1,5 @@
 /* The Pit — the doors in and the clock: sign-in, the live notebook (reads every 30 s while a cook runs, every 3 s for
-   a while after an order), the sample cooks, the four tabs. */
+   a while after an order), the live row (every 3 s while the smoker is on), the sample cooks, the four tabs. */
 'use strict';
 const TABS = ['now', 'plans', 'history', 'alerts'];
 
@@ -24,7 +24,7 @@ async function onSignIn(e) {
   catch (ex) { msg.textContent = ex.message; msg.hidden = false; }
   btn.disabled = false; btn.textContent = 'Sign in';
 }
-function signOutToGate() { sb.signOut(); S.cook = null; S.readings = []; S.events = []; S.last = null; S.history = []; S.histData = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; showGate(); }
+function signOutToGate() { sb.signOut(); S.live = null; S.cook = null; S.readings = []; S.events = []; S.last = null; S.history = []; S.histData = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; showGate(); }
 
 // ---- live -----------------------------------------------------------------------------------------------------
 async function enterLive() {
@@ -37,7 +37,7 @@ async function enterLive() {
 async function loadLive() {
   const pits = await sb.get('pits?select=id,name,range_min,range_max,alerts&order=created_at.asc&limit=1');
   S.pit = pits[0] || null; S.pitAt = Date.now();
-  await Promise.all([loadPlans(), refreshLive(true)]);
+  await Promise.all([loadPlans(), refreshLive(true), readLiveRow()]);
 }
 async function loadPlans() { S.plans = (await sb.get('plans?select=id,name,plan,archived,updated_at&order=name.asc')).filter(p => p.plan); S.plansAt = Date.now(); }
 async function loadHistory() {
@@ -55,10 +55,11 @@ async function loadHistData(id) {
   return S.histData[id];
 }
 const signature = () => JSON.stringify([S.cook && [S.cook.id, S.cook.status, S.cook.phase, S.cook.pending, S.cook.failed, S.cook.names, S.cook.marks, S.cook.probes], S.readings.length, S.events.length, S.last && [S.last.at, S.last.power], S.pit && S.pit.alerts, S.tab, S.sub]);
-// No session: nothing reads the smoker between cooks (the live part is parked), so opening The Pit is the look: one read,
-// one n8n run, at most one in 10 minutes across every screen. A read that finds the smoker on opens the session (the Door).
+// No session: opening The Pit is the look: one read, one n8n run, at most one in 10 minutes across every screen. A read
+// that finds the smoker on opens the session (the Door). When the live row already says the smoker is off, no look.
 async function lookOnOpen() {
   if (S.mode !== 'live' || S.cook || !S.pit || document.visibilityState !== 'visible') return;
+  const live = liveReading(); if (live && !live.power) return;
   try {
     const rows = await sb.get('orders?action=eq.read&order=at.desc&limit=1&select=at');
     if (rows[0] && Date.now() - tms(rows[0].at) < 10 * MINUTE) return;
@@ -97,18 +98,36 @@ function fastPoll(seconds) { S.fastUntil = Date.now() + seconds * 1000; schedule
 function nextDelay() { if (Date.now() < S.fastUntil) return 3000; return S.cook ? 30000 : 60000; }
 function schedule(ms) { clearTimeout(S.timer); S.timer = setTimeout(pollTick, ms); }
 async function pollTick() { if (S.mode !== 'live') return; if (document.visibilityState === 'visible') await refreshLive(false); schedule(nextDelay()); }
-function startPolling() { schedule(nextDelay()); if (!S.ageTimer) S.ageTimer = setInterval(tickAges, 10000); if (!S.verTimer) S.verTimer = setInterval(checkVersion, 60000); }
+function startPolling() { schedule(nextDelay()); clearTimeout(S.liveTimer); S.liveTimer = setTimeout(liveTick, liveDelay()); if (!S.ageTimer) S.ageTimer = setInterval(tickAges, 10000); if (!S.verTimer) S.verTimer = setInterval(checkVersion, 60000); }
 // A home-screen app keeps the page for ten minutes; this tells him sooner, and a tap reloads (a reload refetches index.html).
 async function checkVersion() {
   if (document.visibilityState !== 'visible' || S.newVersion) return;
   try { const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); const j = await r.json(); if (j.version && j.version !== APP_VERSION) { S.newVersion = j.version; const t = toast('A newer version of The Pit is ready. Tap here to load it.', 'good', 0); t.el.addEventListener('click', () => location.reload()); } } catch (e) { /* offline: fine */ }
 }
-function stopPolling() { clearTimeout(S.timer); S.timer = null; }
+function stopPolling() { clearTimeout(S.timer); S.timer = null; clearTimeout(S.liveTimer); S.liveTimer = null; }
+
+// ---- the live row: the smoker's every report (pit-listen in the notebook writes it, ~every 7 s) ----------------------
+// Its own small loop, 0 n8n runs: every 3 s on screen while the smoker reports with the power on, every 30 s otherwise.
+// Every screen reads the same row, so the TV, the phone and the tablet cost the smoker nothing more than one.
+async function readLiveRow() {
+  if (S.mode !== 'live' || !S.pit || S.liveBusy) return;
+  S.liveBusy = true;
+  try { const rows = await sb.get(`pit_live?pit_id=eq.${S.pit.id}&select=${READING_COLS},got_at`); applyLive(rows[0] || null); }
+  catch (e) { /* the 2-minute readings carry on */ }
+  finally { S.liveBusy = false; }
+}
+function applyLive(row) { S.live = row && row.got_at ? { reading: Object.assign(normReading(row), { live: true }), gotAt: tms(row.got_at) } : null; renderLive(); }
+const liveDelay = () => { const l = liveReading(); return l && l.power ? 3000 : 30000; };
+async function liveTick() {
+  if (S.mode !== 'live') return;
+  if (document.visibilityState === 'visible') await readLiveRow();
+  clearTimeout(S.liveTimer); S.liveTimer = setTimeout(liveTick, liveDelay());
+}
 
 // ---- the sample cooks -----------------------------------------------------------------------------------------
 async function enterDemo(which, atMinutes) {
   stopPolling(); $('#gate').hidden = true; $('#app').hidden = false;
-  S.mode = 'demo'; DEMO.which = DEMO.files[which] || which === 'empty' || which === 'open' ? which : 'brisket'; DEMO.t = null;
+  S.mode = 'demo'; S.live = null; DEMO.which = DEMO.files[which] || which === 'empty' || which === 'open' ? which : 'brisket'; DEMO.t = null;
   try { await loadDemoData(); } catch (e) { toast('Could not load the sample cooks: ' + e.message, 'bad', 8000); return; }
   S.plans = DEMO.planRows.slice(); S.plansAt = Date.now(); S.historyAt = Date.now(); S.hidden = {};
   if (atMinutes != null && DEMO.data[DEMO.which]) DEMO.t = DEMO.data[DEMO.which].t0 + atMinutes * MINUTE;
@@ -139,7 +158,7 @@ function applyDemo() {
   S.cook = demoCookAt(d, t); S.readings = rs.filter(r => r.at <= t); S.events = d.events.filter(e => e.at <= t);
   S.last = S.readings[S.readings.length - 1] || null;
 }
-function leaveDemo() { S.mode = null; S.cook = null; S.readings = []; S.events = []; S.last = null; S.history = []; S.histData = {}; S.hidden = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; S.now = () => Date.now(); $('#demobar').hidden = true; if (S.session) enterLive(); else showGate(); }
+function leaveDemo() { S.mode = null; S.live = null; S.cook = null; S.readings = []; S.events = []; S.last = null; S.history = []; S.histData = {}; S.hidden = {}; S.plans = []; S.plansAt = 0; S.historyAt = 0; S.now = () => Date.now(); $('#demobar').hidden = true; if (S.session) enterLive(); else showGate(); }
 
 // ---- boot -----------------------------------------------------------------------------------------------------
 function boot() {
@@ -152,7 +171,7 @@ function boot() {
   $('#actions').addEventListener('click', onActionsClick);
   $('#strip').addEventListener('click', () => go('now'));
   window.addEventListener('hashchange', onHash);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode === 'live') refreshLive(false).then(lookOnOpen); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode === 'live') { liveTick(); refreshLive(false).then(lookOnOpen); } });
   if (TV) {
     window.addEventListener('popstate', tvPopped);
     document.addEventListener('keydown', e => { if (e.repeat && e.key === 'Enter') e.preventDefault(); }, true);   // a Select held a moment long presses once

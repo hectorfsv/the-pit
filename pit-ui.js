@@ -19,14 +19,14 @@ function renderAll() {
   const place = TV ? focusKey() : null;
   renderStatus(); renderDemoBar();
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === S.tab));
-  const idle = !S.cook && S.tab === 'now' ? idleCook() : null;
-  const v = S.view = S.cook ? buildView(S.cook, S.readings, S.events, S.now()) : idle ? buildView(idle, [], [], S.now(), S.last) : null;
+  const v = S.view = viewNow();
   const main = $('#main');
   if (S.tab === 'now') main.innerHTML = nowHTML(v);
   else if (S.tab === 'plans') main.innerHTML = S.sub ? planViewHTML(S.sub) : plansHTML();
   else if (S.tab === 'history') main.innerHTML = S.sub ? pastHTML(S.sub) : historyHTML();
   else main.innerHTML = alertsHTML();
   afterRender(v);
+  S.liveShape = S.tab === 'now' && v ? liveShape(v) : null;
   renderStrip(v); renderActions(v);
   if (TV && !$('#sheet-root .overlay')) {
     // what the arrows can't otherwise reach: a section with nothing to press still takes the ring, so the page scrolls to it
@@ -35,9 +35,36 @@ function renderAll() {
     if (document.activeElement === document.body) { const el = $('#main .pit [data-act]') || $('#main button,#main a[href]') || $('.tabs a.on'); if (el) el.focus({ preventScroll: true }); }
   }
 }
+// The Now view: the cook (or the smoker alone) with the live row as the newest reading while it is fresh.
+function viewNow() {
+  const live = liveReading();
+  if (S.cook) return buildView(S.cook, S.readings, S.events, S.now(), live);
+  return S.tab === 'now' ? buildView(idleCook(), [], [], S.now(), live || S.last) : null;
+}
+// A live report changes the numbers where they stand: the graph, the sparklines and his place on the remote stay.
+// Anything that changes the screen's shape redraws it: a thermometer plugged or pulled, the power, a door, an error,
+// live starting or stopping. The graph only ever moves with its 2-minute points.
+function liveShape(v) {
+  const s = v.sensors;
+  return JSON.stringify([v.cook.id, v.tiles.map(r => [r.pid, r.temp == null, r.stale, r.live]), v.pit.temp == null, !!v.pit.set, v.last && v.last.power, !!(v.last && v.last.live), s.online, s.door, s.lid, s.fah, (s.errors || []).join()]);
+}
+function renderLive() {
+  if (!S.mode) return;
+  const v = viewNow();
+  if (S.tab !== 'now' || !v) { renderStatus(); renderStrip(v); return; }
+  if (liveShape(v) !== S.liveShape || !$('#main .pit')) { renderAll(); return; }
+  S.view = v;
+  const p = v.pit, num = (el, t) => { if (el && t != null) el.innerHTML = `${rnd(t)}<sup>°F</sup>`; };
+  num($('#main .pit .temp'), p.temp);
+  const st = $('#main .pit .set-temp'); if (st) st.innerHTML = `Set temp${p.set ? ` <b>${p.set}</b>` : ''}`;
+  const heat = $('#main .pit .heat'); if (heat && !(v.last && v.last.power === false)) { heat.textContent = p.heating ? 'heating' : 'holding'; heat.classList.toggle('on', p.heating); }
+  for (const r of v.tiles) num($(`#main .meat[data-pid="${CSS.escape(r.pid)}"] .temp`), r.temp);
+  renderStatus(); renderStrip(v);
+}
 function renderStatus() {
   const b = $('#status'); if (!b) return;
   if (S.mode === 'demo') { b.className = 'chip status demo'; b.innerHTML = '<span class="dot"></span>Sample cook'; return; }
+  if (liveReading()) { b.className = 'chip status on'; b.innerHTML = '<span class="dot"></span>live'; return; }
   const last = S.cook ? S.readings[S.readings.length - 1] : S.last, now = Date.now();
   if (!last) { b.className = 'chip status'; b.innerHTML = '<span class="dot"></span>no reading yet'; return; }
   const fresh = now - last.at <= STALE_MINUTES * MINUTE;
@@ -93,7 +120,7 @@ function meatHTML(r, v) {
   const rate = r.rate == null ? '' : `<div class="rate${r.stalled ? ' stall' : ''}">${r.stalled ? 'the stall, ' : ''}${r.rate >= 0 ? '+' : '−'}${Math.abs(r.rate).toFixed(Math.abs(r.rate) >= 10 ? 0 : 1)}°/h</div>`;
   const pace = r.pace ? `<div class="pace">at this pace, ${r.pace.value} around <b>${fmtClock(r.pace.at)}</b></div>` : '';
   const track = r.steps.length > 1 && r.track ? `<div class="track">${r.steps.map((s, i) => `<span class="${i < r.track.step ? 'done' : i === r.track.step ? 'cur' : ''}">${esc(s.name || 'step ' + (i + 1))}</span>`).join('')}</div>` : '<div></div>';
-  const age = r.tempAt ? `<span class="age${r.stale ? ' stale' : ''}">${r.stale ? 'last read ' + fmtClock(r.tempAt) : `<span data-age="${r.tempAt}">${fmtAgo(r.tempAt, v.now)}</span>`}</span>` : '';
+  const age = r.live ? '<span class="age">live</span>' : r.tempAt ? `<span class="age${r.stale ? ' stale' : ''}">${r.stale ? 'last read ' + fmtClock(r.tempAt) : `<span data-age="${r.tempAt}">${fmtAgo(r.tempAt, v.now)}</span>`}</span>` : '';
   const tap = !v.cook.idle && !v.cook.endedAt ? ` role="button" tabindex="0" aria-label="${esc(capFirst(r.name))}: name it, or tell me at" data-act="tile" data-v="${esc(r.pid)}"` : '';
   return `<article class="meat" style="--c:${r.color}" data-pid="${esc(r.pid)}"${tap}>
     <div class="head"><div class="role">${esc(r.name)}${r.step && r.step.name && r.steps.length > 1 ? `<span class="stepname">, ${esc(r.step.name)}</span>` : ''}</div>${age}</div>
@@ -112,7 +139,7 @@ function pitHTML(v) {
   } else if (v.phase === 'rest') line = `<div class="next">Cook done. The pit sits at <b>${c.restSet || 150}</b> for the hold.</div>`;
   else if (v.phase === 'hold') line = `<div class="next">Holding at <b>${c.restSet || 150}</b>. The meat is watched for 140.</div>`;
   const pending = c.pending ? `<div class="pending">Sent ${c.pending.set}°F, waiting for the smoker to take it</div>` : c.failed ? `<div class="pending">The smoker didn't take ${c.failed.set}°F</div>` : '';
-  const looked = v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : c.idle ? `last read ${fmtStamp(v.sensors.lastHeard)}` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
+  const looked = v.last && v.last.live ? '<span class="live"><i></i>live</span>' : v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : c.idle ? `last read ${fmtStamp(v.sensors.lastHeard)}` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
   const live = c.idle || (!c.endedAt && c.status !== 'done' && c.status !== 'stopped' && !(S.mode === 'demo' && c.status !== 'running'));
   const set = live ? `<button type="button" class="set-temp" data-act="set-pit">Set temp${p.set ? ` <b>${p.set}</b>` : ''}</button>` : p.set ? `<div class="set">set <b>${p.set}</b></div>` : '<div class="set dim">no setpoint</div>';
   const timers = (v.timers || []).filter(t => !t.told || v.now - t.at < 2 * HOUR).slice(-3).map(t => t.told ? `<span class="tm done">${esc(t.name)}: up at ${fmtClock(t.at)}</span>` : `<span class="tm"><b>${esc(t.name)}</b> ${fmtDur(t.left)} left, ${fmtClock(t.at)}</span>`).join('');
