@@ -117,7 +117,7 @@ async function readLiveRow() {
   finally { S.liveBusy = false; }
 }
 function applyLive(row) { S.live = row && row.got_at ? { reading: Object.assign(normReading(row), { live: true }), gotAt: tms(row.got_at) } : null; renderLive(); }
-const liveDelay = () => { const l = liveReading(); return l && l.power ? 3000 : 30000; };
+const liveDelay = () => { const l = liveReading(); return (l && l.power) || S.sbTurning ? 3000 : 30000; };   // turning on: watch for the first report
 async function liveTick() {
   if (S.mode !== 'live') return;
   if (document.visibilityState === 'visible') { await readLiveRow(); if (S.sbOn) standbyFacts(); }

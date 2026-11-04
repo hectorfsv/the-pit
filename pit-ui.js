@@ -22,6 +22,7 @@ function renderAll() {
   const v = S.view = viewNow();
   const main = $('#main');
   S.sbOn = S.tab === 'now' && !!v && standbyWanted(v);
+  if (!S.sbOn && S.sbTurning && v && v.last && v.last.power) S.sbTurning = null;   // the smoker reported on: the stand-by lifts, the word with it
   main.classList.toggle('sb', S.sbOn);
   if (S.sbOn) { main.innerHTML = standbyHTML(v); standbyFacts(); }
   else if (S.tab === 'now') main.innerHTML = nowHTML(v);
@@ -114,28 +115,41 @@ function standbySince() {
   if (!S.sbSince) return '';
   return Date.now() - S.sbSince < 20 * HOUR ? `since ${fmtClock(S.sbSince)}` : `since ${fmtDay(S.sbSince)}, ${fmtClock(S.sbSince)}`;
 }
+// Power on from the stand-by: the words say so until the smoker reports on (the stand-by then lifts by itself), or
+// the order comes back refused or expired, or three minutes pass with no word.
+function standbyTurning() {
+  const t = S.sbTurning; if (!t) return null;
+  if (Date.now() - t.at > 3 * MINUTE || (t.status && t.status !== 'waiting' && t.status !== 'done' && Date.now() - (t.answeredAt || t.at) > 30 * 1000)) { S.sbTurning = null; return null; }
+  if (t.status === 'refused') return { state: 'Smoker off', line: `Not done: ${t.errs || 'the engine refused it.'}`, busy: false };
+  if (t.status === 'expired') return { state: 'Smoker off', line: 'That order expired before the engine saw it. Nothing was sent late.', busy: false };
+  return { state: 'Turning on…', line: t.status === 'done' ? 'The smoker took it; waiting for its first report.' : 'Power on sent, waiting for the engine…', busy: true };
+}
 function standbyLast() {
   const h = S.sbLast; if (!h) return '';
   const name = h.meat ? capFirst(String(h.meat).replace(/_/g, ' ')) : (h.plan && h.plan.name) || 'Session';
   return `Last: ${esc(name)}, ${fmtDay(h.startedAt)} ${fmtClock(h.startedAt)}${h.endedAt ? ` – ${fmtClock(h.endedAt)}` : ''}`;
 }
 function standbyHTML(v) {
-  const m = S.sbMedia || {};
+  const m = S.sbMedia || {}, t = standbyTurning();
   return `<section class="standby" tabindex="0" aria-label="The smoker is off."${m.poster ? ` style="background-image:url(${m.poster})"` : ''}>
     <video class="sb-video" muted loop playsinline autoplay preload="auto"${m.poster ? ` poster="${m.poster}"` : ''}${m.video ? ` src="${m.video}"` : ''}></video>
     <div class="sb-shade"></div>
     <div class="sb-clock mono">${fmtClock(Date.now())}</div>
     <div class="sb-body">
-      <div class="sb-state">Smoker off</div>
-      <div class="sb-since dim">${standbySince()}</div>
+      <div class="sb-state${t && t.busy ? ' turning' : ''}">${t ? t.state : 'Smoker off'}</div>
+      <div class="sb-since dim">${t ? esc(t.line) : standbySince()}</div>
       <div class="sb-reads mono">${standbyReads(v)}</div>
       <div class="sb-last dim">${standbyLast()}</div>
-      <button type="button" class="btn sb-power" data-act="power">Power on</button>
+      <button type="button" class="btn sb-power" data-act="power"${t && t.busy ? ' disabled' : ''}>Power on</button>
     </div></section>`;
 }
 function patchStandby(v) {
   const set = (sel, html) => { const el = $(sel); if (el && el.innerHTML !== html) el.innerHTML = html; };
-  set('#main .sb-reads', standbyReads(v)); set('#main .sb-since', standbySince()); set('#main .sb-last', standbyLast());
+  const t = standbyTurning();
+  set('#main .sb-state', t ? t.state : 'Smoker off'); const st = $('#main .sb-state'); if (st) st.classList.toggle('turning', !!(t && t.busy));
+  set('#main .sb-since', t ? esc(t.line) : standbySince());
+  const pw = $('#main .sb-power'); if (pw) pw.disabled = !!(t && t.busy);
+  set('#main .sb-reads', standbyReads(v)); set('#main .sb-last', standbyLast());
   set('#main .sb-clock', fmtClock(Date.now()));
 }
 

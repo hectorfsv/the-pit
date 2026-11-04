@@ -153,7 +153,12 @@ function openPower() {
   const last = S.view ? S.view.last : S.last;
   if (!last) { openSheet({ title: 'Power', sub: "I haven't read the smoker yet, so I don't know whether it is on. Read it first; then this button turns it on or off.", foot: '<button type="button" class="btn primary" id="sheet-go">Read the smoker now</button><button type="button" class="btn quiet" id="sheet-no">Not now</button>', onOpen: sh => { $('#sheet-go', sh).addEventListener('click', () => { closeSheet(); openReadNow(); }); $('#sheet-no', sh).addEventListener('click', closeSheet); } }); return; }
   const on = !(last.power === false);
-  confirmSheet({ title: on ? 'Turn the smoker off' : 'Turn the smoker on', sub: on ? 'Same as the power button on the smoker. A running cook is told the smoker is off and asks what to do.' : 'The smoker powers on. You still light it.', label: on ? 'Power off' : 'Power on', cls: on ? 'danger' : 'primary', onFire: () => placeOrder('power', !on) });
+  confirmSheet({ title: on ? 'Turn the smoker off' : 'Turn the smoker on', sub: on ? 'Same as the power button on the smoker. A running cook is told the smoker is off and asks what to do.' : 'The smoker powers on. You still light it.', label: on ? 'Power off' : 'Power on', cls: on ? 'danger' : 'primary', onFire: () => {
+    // from the stand-by: its words say "Turning on…" until the smoker reports on, or the order comes back refused or expired
+    if (!on && S.sbOn) { S.sbTurning = { at: Date.now(), status: 'waiting' }; if (S.view) patchStandby(S.view); clearTimeout(S.liveTimer); S.liveTimer = setTimeout(liveTick, 1500); }
+    const told = o => { if (S.sbTurning) { S.sbTurning.status = o.status; S.sbTurning.errs = o.result && o.result.errors && o.result.errors.length ? o.result.errors.join(' ') : ''; S.sbTurning.answeredAt = Date.now(); if (S.sbOn && S.view) patchStandby(S.view); } };
+    placeOrder('power', !on, { after: told }).then(ins => { if (!ins && S.sbTurning && S.mode !== 'demo') { S.sbTurning = null; if (S.sbOn && S.view) patchStandby(S.view); } });
+  } });
 }
 function openReadNow() { placeOrder('read'); }
 const TIMER_PRESETS = [0, 30, 45, 60, 90, 120];

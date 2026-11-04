@@ -208,6 +208,16 @@ const SCENARIOS = [
     if (!(await p.evaluate(() => document.querySelector('#actions').hidden))) f.push('the bar came back');
     if (await p.evaluate(count, '#sheet-root .overlay')) f.push('a sheet opened from a tap on the footage');
     return f; } },
+  { name: 'standby-turning', url: 'index.html?demo=empty&standby=1#now', vps: ['phone-956'], before: async p => { await p.evaluate(() => { S.sbTurning = { at: Date.now(), status: 'waiting' }; patchStandby(S.view); }); }, check: async p => { const f = [];
+    if ((await p.evaluate(text, '.sb-state')) !== 'Turning on…') f.push('the state line does not say Turning on…');
+    if (!/waiting for the engine/.test(await p.evaluate(text, '.sb-since') || '')) f.push('no word on the order under it');
+    if (!(await p.evaluate(() => document.querySelector('.sb-power').disabled))) f.push('Power on can be tapped twice');
+    await p.evaluate(() => { S.sbTurning.status = 'done'; patchStandby(S.view); });
+    if (!/took it; waiting for its first report/.test(await p.evaluate(text, '.sb-since') || '')) f.push('the engine taking it is not said');
+    await p.evaluate(() => { S.sbTurning.status = 'refused'; S.sbTurning.errs = 'The smoker is unreachable.'; S.sbTurning.answeredAt = Date.now(); patchStandby(S.view); });
+    if ((await p.evaluate(text, '.sb-state')) !== 'Smoker off' || !/Not done: The smoker is unreachable/.test(await p.evaluate(text, '.sb-since') || '')) f.push('a refused order does not say so');
+    if (await p.evaluate(() => document.querySelector('.sb-power').disabled)) f.push('Power on stays disabled after a refusal');
+    return f; } },
   { name: 'tv-standby', before: noBar, url: 'index.html?demo=empty&standby=1&tv=1#now', vps: ['tv'], check: async p => {
     const f = await tvFits(p, ['.standby', '.sb-body']);
     if (!(await p.evaluate(() => document.activeElement && document.activeElement.classList.contains('standby')))) f.push('the ring is not on the stand-by');
