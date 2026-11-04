@@ -21,7 +21,10 @@ function renderAll() {
   $$('.tabs a').forEach(a => a.classList.toggle('on', a.dataset.tab === S.tab));
   const v = S.view = viewNow();
   const main = $('#main');
-  if (S.tab === 'now') main.innerHTML = nowHTML(v);
+  S.sbOn = S.tab === 'now' && !!v && standbyWanted(v);
+  main.classList.toggle('sb', S.sbOn);
+  if (S.sbOn) { main.innerHTML = standbyHTML(v); standbyFacts(); }
+  else if (S.tab === 'now') main.innerHTML = nowHTML(v);
   else if (S.tab === 'plans') main.innerHTML = S.sub ? planViewHTML(S.sub) : plansHTML();
   else if (S.tab === 'history') main.innerHTML = S.sub ? pastHTML(S.sub) : historyHTML();
   else main.innerHTML = alertsHTML();
@@ -32,7 +35,7 @@ function renderAll() {
     // what the arrows can't otherwise reach: a section with nothing to press still takes the ring, so the page scrolls to it
     $$('.now .steps ol,.now .log ul,.now .sensors').forEach((e, i) => { e.tabIndex = 0; e.dataset.spot = i; });
     refocus(place);
-    if (document.activeElement === document.body) { const el = $('#main .pit [data-act]') || $('#main button,#main a[href]') || $('.tabs a.on'); if (el) el.focus({ preventScroll: true }); }
+    if (document.activeElement === document.body) { const el = (S.sbOn && $('#main .standby')) || $('#main .pit [data-act]') || $('#main button,#main a[href]') || $('.tabs a.on'); if (el) el.focus({ preventScroll: true }); }
   }
 }
 // The Now view: the cook (or the smoker alone) with the live row as the newest reading while it is fresh.
@@ -52,8 +55,9 @@ function renderLive() {
   if (!S.mode) return;
   const v = viewNow();
   if (S.tab !== 'now' || !v) { renderStatus(); renderStrip(v); return; }
-  if (liveShape(v) !== S.liveShape || !$('#main .pit')) { renderAll(); return; }
+  if (liveShape(v) !== S.liveShape || !$(S.sbOn ? '#main .standby' : '#main .pit')) { renderAll(); return; }
   S.view = v;
+  if (S.sbOn) { patchStandby(v); renderStatus(); renderStrip(v); return; }
   const p = v.pit, num = (el, t) => { if (el && t != null) el.innerHTML = `${rnd(t)}<sup>°F</sup>`; };
   num($('#main .pit .temp'), p.temp);
   const st = $('#main .pit .set-temp'); if (st) st.innerHTML = `Set temp${p.set ? ` <b>${p.set}</b>` : ''}`;
@@ -88,6 +92,50 @@ function renderDemoBar() {
   $('#demo-t').addEventListener('input', e => { DEMO.t = +e.target.value; applyDemo(); renderAll(); });
   $('#demo-which').addEventListener('change', e => { DEMO.which = e.target.value; DEMO.t = null; applyDemo(); renderAll(); });
   $$('[data-jump]', bar).forEach(b => b.addEventListener('click', () => { DEMO.t = +b.dataset.jump; applyDemo(); renderAll(); }));
+}
+
+// ---- the stand-by: the smoker off, no session (his word 11-02: "when the smoker is off... a stand by screen") -------
+// His own footage behind it (the loop in the notebook's private bucket, `tools/standby_clip.sh`), the state on top.
+// Nothing moves but the video: the shade and the words are painted once, a live report patches the numbers in place,
+// a tap or Select shows the page under it for a minute. It never shows during a session: that screen says "smoker off".
+function standbyWanted(v) {
+  if (STANDBY === false || !v || S.tab !== 'now' || S.cook || Date.now() < S.sbPeek) return false;
+  if (STANDBY === true) return true;
+  return S.mode === 'live' && !!(v.last && v.last.power === false);
+}
+function standbyReads(v) {
+  const parts = [];
+  if (v.pit.temp != null) parts.push(`Pit <b>${rnd(v.pit.temp)}°</b>`);
+  for (const r of v.tiles) if (r.temp != null) parts.push(`${esc(capFirst(r.name))} <b>${rnd(r.temp)}°</b>`);
+  return parts.join('<span class="sep">·</span>');
+}
+function standbySince() {
+  if (!S.sbSince) return '';
+  return Date.now() - S.sbSince < 20 * HOUR ? `since ${fmtClock(S.sbSince)}` : `since ${fmtDay(S.sbSince)}, ${fmtClock(S.sbSince)}`;
+}
+function standbyLast() {
+  const h = S.sbLast; if (!h) return '';
+  const name = h.meat ? capFirst(String(h.meat).replace(/_/g, ' ')) : (h.plan && h.plan.name) || 'Session';
+  return `Last: ${esc(name)}, ${fmtDay(h.startedAt)} ${fmtClock(h.startedAt)}${h.endedAt ? ` – ${fmtClock(h.endedAt)}` : ''}`;
+}
+function standbyHTML(v) {
+  const m = S.sbMedia || {};
+  return `<section class="standby" tabindex="0" aria-label="The smoker is off. Select to see the page."${m.poster ? ` style="background-image:url(${m.poster})"` : ''}>
+    <video class="sb-video" muted loop playsinline autoplay preload="auto"${m.poster ? ` poster="${m.poster}"` : ''}${m.video ? ` src="${m.video}"` : ''}></video>
+    <div class="sb-shade"></div>
+    <div class="sb-clock mono">${fmtClock(Date.now())}</div>
+    <div class="sb-body">
+      <div class="sb-state">Smoker off</div>
+      <div class="sb-since dim">${standbySince()}</div>
+      <div class="sb-reads mono">${standbyReads(v)}</div>
+      <div class="sb-last dim">${standbyLast()}</div>
+      <button type="button" class="btn sb-power" data-act="power">Power on</button>
+    </div></section>`;
+}
+function patchStandby(v) {
+  const set = (sel, html) => { const el = $(sel); if (el && el.innerHTML !== html) el.innerHTML = html; };
+  set('#main .sb-reads', standbyReads(v)); set('#main .sb-since', standbySince()); set('#main .sb-last', standbyLast());
+  set('#main .sb-clock', fmtClock(Date.now()));
 }
 
 // ---- Now ----------------------------------------------------------------------------------------------------
@@ -270,7 +318,7 @@ function renderStrip(v) {
 }
 function renderActions(v) {
   const a = $('#actions'); if (!a) return;
-  if (!v || S.tab !== 'now') { a.hidden = true; return; }
+  if (!v || S.tab !== 'now' || S.sbOn) { a.hidden = true; return; }   // the stand-by carries its own Power on
   if (v.cook.idle) { const l = v.last; a.hidden = false; a.className = 'actions three'; a.innerHTML = `<button type="button" class="btn" data-act="read-now">Read now</button><button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn" data-act="power">${l ? (l.power ? 'Power off' : 'Power on') : 'Power'}</button>`; return; }
   if (v.cook.endedAt || v.cook.status === 'done' || v.cook.status === 'stopped') { a.hidden = true; return; }
   a.hidden = false;
@@ -290,6 +338,12 @@ function renderActions(v) {
 // ---- after the HTML is in: the canvases, lazy loads, the ages ---------------------------------------------------
 function afterRender(v) {
   if (S.chart) { S.chart.destroy(); S.chart = null; }
+  const sbEl = $('#main .standby');
+  if (sbEl) {   // a tap or Select on the stand-by shows the page under it for a minute; Power on is its own button
+    sbEl.addEventListener('click', e => { if (!e.target.closest('[data-act="power"]')) peekStandby(); });
+    sbEl.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === sbEl) { e.preventDefault(); peekStandby(); } });
+    const vid = $('video', sbEl); if (vid && vid.src) vid.play().catch(() => {});
+  }
   const host = $('#chart');
   if (host && S.view) { S.chart = new PitChart(host, { zoom: false }); S.chart.setData(chartDataOf(S.view)); }
   if (S.view) for (const c of $$('canvas.spark')) { const r = S.view.roles.find(x => x.pid === c.dataset.pid); if (r) drawSpark(c, r.spark.length > 1 ? r.spark : r.pts.slice(-30), r.color); }
@@ -301,5 +355,6 @@ function afterRender(v) {
 }
 function tickAges() {
   const now = S.now();
+  const clock = $('#main .sb-clock'); if (clock) clock.textContent = fmtClock(Date.now());
   for (const el of $$('[data-age]')) { const t = +el.dataset.age; el.textContent = el.dataset.mode === 'clock' ? fmtStamp(t) : fmtAgo(t, S.mode === 'demo' ? now : Date.now()); }
 }

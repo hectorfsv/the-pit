@@ -160,6 +160,27 @@ a{color:inherit;text-decoration:none}
 .pit .role{font-weight:600;font-size:15px}
 .pit .stepname{font-size:12.5px;color:var(--ink-dim)}
 .pit .stepname .live.off i{background:var(--ink-faint);box-shadow:none}
+
+/* ---- the stand-by: his footage edge to edge, the state over it; only the video moves (the shade is one static layer) */
+.main.sb{display:flex;padding:0;max-width:none}
+.standby{position:relative;flex:1;min-height:60vh;overflow:hidden;background:var(--void) center/cover no-repeat;outline-offset:-3px}
+.standby .sb-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.standby .sb-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,7,8,.12),rgba(10,7,8,.28) 50%,rgba(10,7,8,.92))}
+.standby .sb-clock{position:absolute;top:12px;right:var(--gut);font-size:22px;color:var(--ink-dim);text-shadow:0 1px 8px rgba(0,0,0,.7)}
+.standby .sb-body{position:absolute;left:var(--gut);right:var(--gut);bottom:20px;display:grid;gap:5px;text-shadow:0 1px 10px rgba(0,0,0,.75)}
+.standby .sb-state{font-family:var(--num);font-size:58px;line-height:.9;letter-spacing:.01em;color:var(--ink)}
+.standby .sb-since{font-size:15px;min-height:1.4em}
+.standby .sb-reads{font-size:14px;color:var(--ink-dim);min-height:1.4em}
+.standby .sb-reads b{color:var(--ink);font-weight:500}
+.standby .sb-reads .sep{margin:0 8px;color:var(--ink-faint)}
+.standby .sb-last{font-size:13px;min-height:1.4em}
+.standby .sb-power{justify-self:start;margin-top:8px;background:rgba(21,16,15,.72);text-shadow:none}
+html.tv .standby .sb-state{font-size:88px}
+html.tv .standby .sb-clock{font-size:34px;top:18px}
+html.tv .standby .sb-since,html.tv .standby .sb-reads{font-size:21px}
+html.tv .standby .sb-last{font-size:18px}
+html.tv .standby .sb-body{bottom:32px;gap:8px}
+@media (prefers-reduced-motion:reduce){.standby .sb-video{display:none}}
 .pit .stepname .live i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--go);box-shadow:0 0 8px var(--go);margin-right:6px;vertical-align:1px}   /* still: nothing on this page animates for live */
 .pit .big{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-top:2px}
 .pit .temp{font-family:var(--num);font-size:96px;line-height:.82;letter-spacing:.005em;display:inline-flex;align-items:flex-start;color:var(--ember-hot)}

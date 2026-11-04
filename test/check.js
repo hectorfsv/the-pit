@@ -191,6 +191,26 @@ const SCENARIOS = [
     if (!/smoker off/.test(await p.evaluate(text, '.pit .heat') || '')) f.push('the tile does not say smoker off');
     if (!/Power on/.test(await p.evaluate(text, '#actions') || '')) f.push('the bar does not offer Power on');
     return f; } },
+  { name: 'standby', url: 'index.html?demo=empty&standby=1#now', vps: ['phone-700', 'phone-956', 'tablet', 'desktop'], check: async p => { const f = [];
+    if (!(await p.evaluate(count, '#main .standby'))) return ['no stand-by with the smoker off'];
+    if ((await p.evaluate(text, '.sb-state')) !== 'Smoker off') f.push('the state line is not "Smoker off"');
+    if (!(await p.evaluate(count, '.standby video'))) f.push('no video element');
+    if (!/Power on/.test(await p.evaluate(text, '.standby .sb-power') || '')) f.push('no Power on on the stand-by');
+    if (!(await p.evaluate(() => document.querySelector('#actions').hidden))) f.push('the action bar shows under the stand-by');
+    if (await p.evaluate(count, '.pit')) f.push('the Pit tile shows under the stand-by');
+    const sb = await p.evaluate(vis, '.standby'), bar = await p.evaluate(vis, '.bottom');
+    if (!sb || sb.bottom > bar.y + 1 || sb.bottom - sb.y < 300) f.push(`the stand-by does not fill the screen above the tabs (${sb && Math.round(sb.bottom - sb.y)} px tall, ends ${sb && Math.round(sb.bottom)}, tabs at ${Math.round(bar.y)})`);
+    const body = await p.evaluate(vis, '.sb-body'); if (!body || body.bottom > bar.y + 1) f.push('the words run under the tabs');
+    return f; } },
+  { name: 'standby-peek', url: 'index.html?demo=empty&standby=1#now', vps: ['phone-956'], before: async p => { await p.click('.standby .sb-state'); await p.waitForSelector('.pit .temp', { timeout: 3000 }).catch(() => {}); }, check: async p => { const f = [];
+    if (await p.evaluate(count, '.standby')) f.push('a tap did not lift the stand-by');
+    if (!(await p.evaluate(count, '.pit .temp'))) f.push('the page is not under it');
+    if (!/Power on/.test(await p.evaluate(text, '#actions') || '')) f.push('the bar is not back under the lifted stand-by');
+    return f; } },
+  { name: 'tv-standby', before: noBar, url: 'index.html?demo=empty&standby=1&tv=1#now', vps: ['tv'], check: async p => {
+    const f = await tvFits(p, ['.standby', '.sb-body']);
+    if (!(await p.evaluate(() => document.activeElement && document.activeElement.classList.contains('standby')))) f.push('the ring is not on the stand-by');
+    return f; } },
   { name: 'live-tv', url: 'index.html?demo=brisket&tv=1#now', vps: ['tv'], before: async p => { await noBar(p); await p.waitForTimeout(150);
     await p.evaluate(() => { document.querySelector('.pit .set-temp').focus(); window.__chart = document.querySelector('#chart canvas'); const l = S.readings[S.readings.length - 1];
       for (const [pit, heating] of [[233, true], [234, false], [235, true]]) { if (pit === 234) window.__chart = document.querySelector('#chart canvas'); applyLive({ at: new Date(S.now()).toISOString(), got_at: new Date().toISOString(), pit, setpoint: l.set, heating, power: true, fah: true, lid_open: false, door_open: false, probes: l.probes, errors: [], rssi: -50 }); } }); }, check: async p => { const f = [];

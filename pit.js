@@ -120,9 +120,43 @@ function applyLive(row) { S.live = row && row.got_at ? { reading: Object.assign(
 const liveDelay = () => { const l = liveReading(); return l && l.power ? 3000 : 30000; };
 async function liveTick() {
   if (S.mode !== 'live') return;
-  if (document.visibilityState === 'visible') await readLiveRow();
+  if (document.visibilityState === 'visible') { await readLiveRow(); if (S.sbOn) standbyFacts(); }
   clearTimeout(S.liveTimer); S.liveTimer = setTimeout(liveTick, liveDelay());
 }
+
+// ---- the stand-by's facts and footage -------------------------------------------------------------------------
+// Off since: the last report with the power on (pit_live_log keeps 48 h; older stays blank). The last cook: History's
+// newest. The footage: his own loop in the private bucket `standby`, through a signed URL his sign-in asks for, kept
+// a week so the browser caches the file. One read of each every 10 minutes while the stand-by shows; 0 n8n runs.
+async function standbyFacts() {
+  if (S.mode !== 'live' || !S.sbOn || Date.now() - S.sbAt < 10 * MINUTE) return;
+  S.sbAt = Date.now();
+  try {
+    const [on, media] = await Promise.all([sb.get('pit_live_log?power=eq.true&order=got_at.desc&limit=1&select=at'), standbyMedia()]);
+    S.sbSince = on[0] ? tms(on[0].at) : null;
+    if (Date.now() - (S.historyAt || 0) > 10 * MINUTE) await loadHistory();
+    S.sbLast = S.history[0] || null;
+    if (media && media.video !== (S.sbMedia || {}).video) {
+      S.sbMedia = media;
+      const el = $('#main .standby'), vid = el && $('video', el);
+      if (el && media.poster) { el.style.backgroundImage = `url(${media.poster})`; vid.poster = media.poster; }
+      if (vid && media.video) { vid.src = media.video; vid.play().catch(() => {}); }
+    }
+    if (S.sbOn && S.view) patchStandby(S.view);
+  } catch (e) { S.sbAt = 0; /* the words stay blank; the next tick tries again */ }
+}
+async function standbyMedia() {
+  const kept = store.get('pit.standby');
+  if (kept && kept.video && kept.exp > Date.now() + 24 * HOUR) return kept;
+  const sign = async name => {
+    const r = await fetch(`${sb.url}/storage/v1/object/sign/standby/${name}`, { method: 'POST', headers: sb.headers(true), body: JSON.stringify({ expiresIn: 7 * 86400 }) });
+    if (!r.ok) throw new Error('sign ' + r.status);
+    return `${sb.url}/storage/v1${(await r.json()).signedURL}`;
+  };
+  const m = { video: await sign('standby.mp4'), poster: await sign('standby.jpg'), exp: Date.now() + 7 * 86400 * 1000 };
+  store.set('pit.standby', m); return m;
+}
+function peekStandby() { S.sbPeek = Date.now() + 60 * 1000; renderAll(); setTimeout(() => { if (Date.now() >= S.sbPeek) renderAll(); }, 61 * 1000); }
 
 // ---- the sample cooks -----------------------------------------------------------------------------------------
 async function enterDemo(which, atMinutes) {
@@ -171,7 +205,10 @@ function boot() {
   $('#actions').addEventListener('click', onActionsClick);
   $('#strip').addEventListener('click', () => go('now'));
   window.addEventListener('hashchange', onHash);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.mode === 'live') { liveTick(); refreshLive(false).then(lookOnOpen); } });
+  document.addEventListener('visibilitychange', () => {
+    const vid = $('#main .standby video'); if (vid) { if (document.visibilityState === 'visible') vid.play().catch(() => {}); else vid.pause(); }
+    if (document.visibilityState === 'visible' && S.mode === 'live') { liveTick(); refreshLive(false).then(lookOnOpen); }
+  });
   if (TV) {
     window.addEventListener('popstate', tvPopped);
     document.addEventListener('keydown', e => { if (e.repeat && e.key === 'Enter') e.preventDefault(); }, true);   // a Select held a moment long presses once

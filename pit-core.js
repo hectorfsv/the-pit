@@ -7,8 +7,10 @@ const ENGINE = typeof PitEngine !== 'undefined' ? PitEngine : null;
 // The Fire TV Stick inside Hubs: a remote and no touch, the room away. Hubs hands this page the arrows as Tab and Shift+Tab
 // and Select as Enter; only html.tv and the lines behind TV change anything, so the phone never sees any of it.
 const TV = /\bAFT[A-Z0-9]/.test(navigator.userAgent) || /[?&]tv=1\b/.test(location.search);
+// The stand-by screen: by the rule (the smoker off, no session) when unset; ?standby=1 forces it (a sample, a test), ?standby=0 never.
+const STANDBY = (m => m ? m[1] === '1' : null)(/[?&]standby=([01])\b/.exec(location.search));
 if (TV) document.documentElement.classList.add('tv');
-const APP_VERSION = '202611032100';
+const APP_VERSION = '202611032230';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // the six checks pass on the panel
 const PORT_COLOR = { p1: 0, p2: 1, p3: 2, p0: 3 };                    // a colour stays with its port: pulling one out never repaints another
 const colorOf = pid => MEAT_COLORS[pid in PORT_COLOR ? PORT_COLOR[pid] : 3];
@@ -47,7 +49,8 @@ const S = {
   tab: 'now', sub: null, hidden: {},      // hidden: legend toggles
   now: () => Date.now(),   // the demo moves this
   view: null, chart: null, timer: null, fastUntil: 0, busy: false,
-  live: null, liveTimer: null, liveBusy: false, liveShape: null,   // the live row: { reading, gotAt }
+  live: null, liveTimer: null, liveBusy: false, liveShape: null,
+  sbOn: false, sbPeek: 0, sbAt: 0, sbSince: null, sbLast: null, sbMedia: null,   // the live row: { reading, gotAt }
 };
 // The live row (the notebook's listener, pit-listen, writes every report the smoker pushes, ~every 7 s) is the smoker
 // now while it is fresh. Stale, the screen falls back to the 2-minute readings by itself: a hand-over can drop one report.
