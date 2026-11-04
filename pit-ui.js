@@ -64,7 +64,8 @@ function renderLive() {
 function renderStatus() {
   const b = $('#status'); if (!b) return;
   if (S.mode === 'demo') { b.className = 'chip status demo'; b.innerHTML = '<span class="dot"></span>Sample cook'; return; }
-  if (liveReading()) { b.className = 'chip status on'; b.innerHTML = '<span class="dot"></span>live'; return; }
+  const l = liveReading();   // the smoker reports with the power off too (for minutes after, then on and off): that is not a green "live"
+  if (l) { b.className = 'chip status' + (l.power ? ' on' : ''); b.innerHTML = `<span class="dot"></span>${l.power ? 'live' : 'smoker off'}`; return; }
   const last = S.cook ? S.readings[S.readings.length - 1] : S.last, now = Date.now();
   if (!last) { b.className = 'chip status'; b.innerHTML = '<span class="dot"></span>no reading yet'; return; }
   const fresh = now - last.at <= STALE_MINUTES * MINUTE;
@@ -136,10 +137,10 @@ function pitHTML(v) {
   else if ((v.phase === 'cook' || v.phase === 'paused') && p.step) {
     const s = p.step, last = p.idx === p.steps.length - 1;
     line = `<div class="next"><b>${esc(s.name || 'Step ' + (p.idx + 1))}</b>${typeof s.set === 'number' ? `, pit at ${s.set}` : ''}${p.until ? ', ' + p.until.html : last ? '. The last step: tap Cook done when the meat is off' : ''}${p.next ? ` <span class="dim">then ${esc(p.next.name || 'the next step')}${typeof p.next.set === 'number' ? ` at ${p.next.set}` : ''}</span>` : ''}</div>`;
-  } else if (v.phase === 'rest') line = `<div class="next">Cook done. The pit sits at <b>${c.restSet || 150}</b> for the hold.</div>`;
+  } else if (v.phase === 'rest') line = `<div class="next">Cook done. ${p.set != null && p.set >= (c.restSet || 150) ? `The pit sits at <b>${c.restSet || 150}</b> for the hold.` : 'The pit is left as it is.'}</div>`;
   else if (v.phase === 'hold') line = `<div class="next">Holding at <b>${c.restSet || 150}</b>. The meat is watched for 140.</div>`;
   const pending = c.pending ? `<div class="pending">Sent ${c.pending.set}°F, waiting for the smoker to take it</div>` : c.failed ? `<div class="pending">The smoker didn't take ${c.failed.set}°F</div>` : '';
-  const looked = v.last && v.last.live ? '<span class="live"><i></i>live</span>' : v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : c.idle ? `last read ${fmtStamp(v.sensors.lastHeard)}` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
+  const looked = v.last && v.last.live ? (v.last.power === false ? '<span class="live off"><i></i>off</span>' : '<span class="live"><i></i>live</span>') : v.sensors.lastHeard ? (v.sensors.online ? `looked <span data-age="${v.sensors.lastHeard}">${fmtAgo(v.sensors.lastHeard, v.now)}</span>` : c.idle ? `last read ${fmtStamp(v.sensors.lastHeard)}` : `offline since ${fmtClock(v.sensors.lastHeard)}`) : 'no reading yet';
   const live = c.idle || (!c.endedAt && c.status !== 'done' && c.status !== 'stopped' && !(S.mode === 'demo' && c.status !== 'running'));
   const set = live ? `<button type="button" class="set-temp" data-act="set-pit">Set temp${p.set ? ` <b>${p.set}</b>` : ''}</button>` : p.set ? `<div class="set">set <b>${p.set}</b></div>` : '<div class="set dim">no setpoint</div>';
   const timers = (v.timers || []).filter(t => !t.told || v.now - t.at < 2 * HOUR).slice(-3).map(t => t.told ? `<span class="tm done">${esc(t.name)}: up at ${fmtClock(t.at)}</span>` : `<span class="tm"><b>${esc(t.name)}</b> ${fmtDur(t.left)} left, ${fmtClock(t.at)}</span>`).join('');
@@ -274,7 +275,13 @@ function renderActions(v) {
   if (v.cook.endedAt || v.cook.status === 'done' || v.cook.status === 'stopped') { a.hidden = true; return; }
   a.hidden = false;
   const paused = v.cook.status === 'paused';
-  if (!v.hasPlan) { a.className = 'actions two'; a.innerHTML = '<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn primary" data-act="done">Cook done</button>'; }
+  if (!v.hasPlan) {
+    // A session: End leaves the smoker as it is. Cook done only when the pit is set above the hold, so it has something
+    // to lower (a cook he runs by hand); on a cold or idle pit it did nothing but raise it (11-03).
+    const hot = !!(v.last && v.last.power !== false && v.pit.set != null && v.pit.set > (v.last.range ? v.last.range.min : 150));
+    a.className = hot ? 'actions three' : 'actions two';
+    a.innerHTML = `<button type="button" class="btn" data-act="set">Set pit</button>${hot ? '<button type="button" class="btn" data-act="done">Cook done</button>' : ''}<button type="button" class="btn primary" data-act="end">End session</button>`;
+  }
   else if (v.phase === 'cook' || v.phase === 'paused') { a.className = 'actions'; a.innerHTML = `<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn" data-act="next">Next step</button><button type="button" class="btn" data-act="${paused ? 'resume' : 'pause'}">${paused ? 'Resume' : 'Pause'}</button><button type="button" class="btn primary" data-act="done">Cook done</button>`; }
   else if (v.phase === 'rest') { a.className = 'actions three'; a.innerHTML = '<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn" data-act="rested">Rested</button><button type="button" class="btn primary" data-act="end">End cook</button>'; }
   else { a.className = 'actions two'; a.innerHTML = '<button type="button" class="btn" data-act="set">Set pit</button><button type="button" class="btn primary" data-act="end">End cook</button>'; }

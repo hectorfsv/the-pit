@@ -555,10 +555,13 @@ function act({ cook: c0, action, value, reading, now, alerts }) {
       cook.resting = Object.keys(cook.probes).filter(r => ctx.temps[r] != null && !(cook.tracks[r] && !cook.tracks[r].ended));
       cook.rested = {};
       cook.restSet = (reading.range || { min: 150 }).min;
-      say(out, 'step', `Cook done. Pit to ${cook.restSet}°F for the hold. ` + (cook.resting.length
+      // Cook done only ever lowers the pit. A pit set at or below the hold (a session with nothing sent, 11-03: it
+      // raised a cold pit to 150 with the fan at 100%) is left as it is.
+      const lower = typeof reading.set === 'number' && reading.set > cook.restSet;
+      say(out, 'step', `Cook done. ${lower ? `Pit to ${cook.restSet}°F for the hold. ` : 'The pit is left as it is. '}` + (cook.resting.length
         ? `Resting: the ${cook.resting.join(' and the ')}; I'll tell you at ${RULES.restTo}°F.`
         : `Tap Rested when the meat is down to ${RULES.restTo}–155°F.`), { phase: 'rest' });
-      requestSet(cook, cook.restSet, ctx, 'plan');                 // refused (°C) = an alert; the rest goes on
+      if (lower) requestSet(cook, cook.restSet, ctx, 'plan');      // refused (°C) = an alert; the rest goes on
       break;
     }
     case 'rested':

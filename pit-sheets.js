@@ -140,10 +140,14 @@ function openNext() {
 }
 function openDone() {
   const v = S.view, meats = v ? v.roles.filter(r => r.role && r.temp != null).map(r => r.role) : [];
-  confirmSheet({ title: 'Cook done', sub: `The pit drops to ${v && v.last && v.last.range ? v.last.range.min : 150}°F for the hold. ${meats.length ? `The ${meats.join(' and the ')} rest off the smoker; I tell you at 160.` : 'Tap Rested when the meat is down to 160–155.'} Then the hold, as long as you can.`, label: 'Cook done', onFire: () => placeOrder('done') });
+  const min = v && v.last && v.last.range ? v.last.range.min : 150, set = v ? v.pit.set : null;
+  confirmSheet({ title: 'Cook done', sub: `${set != null && set > min ? `The pit drops to ${min}°F for the hold.` : 'The pit is left as it is.'} ${meats.length ? `The ${meats.join(' and the ')} rest off the smoker; I tell you at 160.` : 'Tap Rested when the meat is down to 160–155.'} Then the hold, as long as you can.`, label: 'Cook done', onFire: () => placeOrder('done') });
 }
 function openRested() { confirmSheet({ title: 'Rested', sub: 'The meat is down to 160–155. Back in the smoker or the oven at 150: the hold begins and I watch for 140.', label: 'Rested, start the hold', onFire: () => placeOrder('rested') }); }
-function openEnd() { confirmSheet({ title: 'End the cook', sub: 'The cook closes and goes to History. The smoker is left as it is.', label: 'End the cook', cls: 'danger', onFire: () => placeOrder('end') }); }
+function openEnd() {
+  const what = S.view && !S.view.hasPlan ? 'session' : 'cook';
+  confirmSheet({ title: `End the ${what}`, sub: `The ${what} closes and goes to History. The smoker is left as it is.`, label: `End the ${what}`, cls: 'danger', onFire: () => placeOrder('end') });
+}
 function openResume() { confirmSheet({ title: 'Back to the plan', sub: "The plan's setpoint goes to the smoker again and the steps move on.", label: 'Resume the plan', onFire: () => placeOrder('resume') }); }
 function openPower() {
   const last = S.view ? S.view.last : S.last;

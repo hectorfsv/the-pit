@@ -33,6 +33,8 @@ const painted = sel => { const c = document.querySelector(sel); if (!c) return -
 const vis = sel => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, bottom: r.bottom, text: (e.textContent || '').trim().slice(0, 80), vh: innerHeight, vw: innerWidth }; };
 const count = sel => document.querySelectorAll(sel).length;
 const text = sel => { const e = document.querySelector(sel); return e ? e.textContent.trim() : null; };
+// The status chip as the live page draws it (a sample cook's chip says "Sample cook" whatever the smoker does).
+const liveChip = () => { const m = S.mode; S.mode = 'live'; renderStatus(); const t = document.querySelector('#status').textContent.trim(); S.mode = m; renderStatus(); return t; };
 
 const noBar = p => p.evaluate(() => { const b = document.querySelector('#demobar'); if (b) b.style.display = 'none'; window.dispatchEvent(new Event('resize')); });   // a real cook has no sample bar
 // The TV has one screen to fill: everything named must sit above the bottom bar, with nothing to scroll for.
@@ -91,7 +93,8 @@ const SCENARIOS = [
     const [a, b] = await p.evaluate(() => [...document.querySelectorAll('.meat')].map(e => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width }; }));
     if (!a || !b || Math.abs(a.y - b.y) > 1 || b.x < a.x + a.w) f.push('the tiles do not sit side by side');
     if (!/no target/.test(await p.evaluate(text, '.meat') || '')) f.push('a thermometer with no plan should say so');
-    if ((await p.evaluate(count, '#actions .btn')) !== 2) f.push('the bar is not Set pit and Cook done');
+    const bar = await p.evaluate(text, '#actions') || '';   // the pit is set hot here (the brisket's), so Cook done has something to lower
+    if ((await p.evaluate(count, '#actions .btn')) !== 3 || !/Cook done/.test(bar) || !/End session/.test(bar)) f.push('the bar on a hand-run session is not Set pit, Cook done, End session: ' + bar);
     if ((await p.evaluate(count, '.steps li'))) f.push('plan steps with no plan');
     if (!(await p.evaluate(count, '[data-act=points]'))) f.push('no Cooking points on a session');
     if ((await p.evaluate(painted, '#chart canvas')) < 400) f.push('no graph');
@@ -172,6 +175,21 @@ const SCENARIOS = [
     if (!/Set temp 225/.test(await p.evaluate(text, '.pit .set-temp') || '')) f.push('Set temp does not carry the live setpoint');
     if (!/live/.test(await p.evaluate(text, '.meat .age') || '')) f.push('the thermometer does not say live');
     if (!/Power off/.test(await p.evaluate(text, '#actions') || '')) f.push('the bar does not offer Power off with the smoker on');
+    return f; } },
+  { name: 'open-cold', url: 'index.html?demo=open#now', vps: ['phone-956', 'desktop'], before: async p => {   // 11-03: a session, nothing sent, the pit cold: Cook done would only have raised it
+    await p.evaluate(() => applyLive({ at: new Date().toISOString(), got_at: new Date().toISOString(), pit: 58, setpoint: 0, heating: false, power: true, fah: true, lid_open: false, door_open: false, probes: { p0: null, p1: 58, p2: 59, p3: 61 }, errors: [0, 0, 0, 0, 0], rssi: -48 })); }, check: async p => { const f = [];
+    const bar = await p.evaluate(text, '#actions') || '';
+    if ((await p.evaluate(count, '#actions .btn')) !== 2 || /Cook done/.test(bar) || !/End session/.test(bar)) f.push('a session with the pit not set should offer Set pit and End session only: ' + bar);
+    if (!/^live$/.test(await p.evaluate(liveChip))) f.push('the chip does not say live with the power on');
+    return f; } },
+  { name: 'live-off', url: 'index.html?demo=empty#now', vps: ['phone-956', 'desktop'], before: async p => {   // the smoker reports for minutes after the power goes off: the page says off, never a green live
+    await p.evaluate(() => applyLive({ at: new Date().toISOString(), got_at: new Date().toISOString(), pit: 54, setpoint: 0, heating: false, power: false, fah: true, lid_open: false, door_open: false, probes: { p0: null, p1: 54, p2: 54, p3: 56 }, errors: [0, 0, 0, 0, 0], rssi: -54 })); }, check: async p => { const f = [];
+    const chip = await p.evaluate(liveChip);
+    if (chip !== 'smoker off') f.push('the chip with the power off says: ' + chip);
+    if (await p.evaluate(() => { const m = S.mode; S.mode = 'live'; renderStatus(); const on = document.querySelector('#status').classList.contains('on'); S.mode = m; renderStatus(); return on; })) f.push('the chip is green with the power off');
+    if ((await p.evaluate(text, '.pit .stepname') || '').trim() !== 'off') f.push('the Pit tile tag is not "off": ' + await p.evaluate(text, '.pit .stepname'));
+    if (!/smoker off/.test(await p.evaluate(text, '.pit .heat') || '')) f.push('the tile does not say smoker off');
+    if (!/Power on/.test(await p.evaluate(text, '#actions') || '')) f.push('the bar does not offer Power on');
     return f; } },
   { name: 'live-tv', url: 'index.html?demo=brisket&tv=1#now', vps: ['tv'], before: async p => { await noBar(p); await p.waitForTimeout(150);
     await p.evaluate(() => { document.querySelector('.pit .set-temp').focus(); window.__chart = document.querySelector('#chart canvas'); const l = S.readings[S.readings.length - 1];
