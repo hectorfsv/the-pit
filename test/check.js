@@ -202,10 +202,11 @@ const SCENARIOS = [
     if (!sb || sb.bottom > bar.y + 1 || sb.bottom - sb.y < 300) f.push(`the stand-by does not fill the screen above the tabs (${sb && Math.round(sb.bottom - sb.y)} px tall, ends ${sb && Math.round(sb.bottom)}, tabs at ${Math.round(bar.y)})`);
     const body = await p.evaluate(vis, '.sb-body'); if (!body || body.bottom > bar.y + 1) f.push('the words run under the tabs');
     return f; } },
-  { name: 'standby-peek', url: 'index.html?demo=empty&standby=1#now', vps: ['phone-956'], before: async p => { await p.click('.standby .sb-state'); await p.waitForSelector('.pit .temp', { timeout: 3000 }).catch(() => {}); }, check: async p => { const f = [];
-    if (await p.evaluate(count, '.standby')) f.push('a tap did not lift the stand-by');
-    if (!(await p.evaluate(count, '.pit .temp'))) f.push('the page is not under it');
-    if (!/Power on/.test(await p.evaluate(text, '#actions') || '')) f.push('the bar is not back under the lifted stand-by');
+  { name: 'standby-stays', url: 'index.html?demo=empty&standby=1#now', vps: ['phone-956'], before: async p => { await p.click('.standby .sb-state'); await p.click('.standby .sb-video', { force: true }); await p.keyboard.press('Enter'); await p.waitForTimeout(400); }, check: async p => { const f = [];   // his word 11-03: a tap does nothing
+    if (!(await p.evaluate(count, '.standby'))) f.push('a tap lifted the stand-by');
+    if (await p.evaluate(count, '.pit .temp')) f.push('the page came up under it');
+    if (!(await p.evaluate(() => document.querySelector('#actions').hidden))) f.push('the bar came back');
+    if (await p.evaluate(count, '#sheet-root .overlay')) f.push('a sheet opened from a tap on the footage');
     return f; } },
   { name: 'tv-standby', before: noBar, url: 'index.html?demo=empty&standby=1&tv=1#now', vps: ['tv'], check: async p => {
     const f = await tvFits(p, ['.standby', '.sb-body']);

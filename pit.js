@@ -156,8 +156,6 @@ async function standbyMedia() {
   const m = { video: await sign('standby.mp4'), poster: await sign('standby.jpg'), exp: Date.now() + 7 * 86400 * 1000 };
   store.set('pit.standby', m); return m;
 }
-function peekStandby() { S.sbPeek = Date.now() + 60 * 1000; renderAll(); setTimeout(() => { if (Date.now() >= S.sbPeek) renderAll(); }, 61 * 1000); }
-
 // ---- the sample cooks -----------------------------------------------------------------------------------------
 async function enterDemo(which, atMinutes) {
   stopPolling(); $('#gate').hidden = true; $('#app').hidden = false;

@@ -96,10 +96,11 @@ function renderDemoBar() {
 
 // ---- the stand-by: the smoker off, no session (his word 11-02: "when the smoker is off... a stand by screen") -------
 // His own footage behind it (the loop in the notebook's private bucket, `tools/standby_clip.sh`), the state on top.
-// Nothing moves but the video: the shade and the words are painted once, a live report patches the numbers in place,
-// a tap or Select shows the page under it for a minute. It never shows during a session: that screen says "smoker off".
+// Nothing moves but the video: the shade and the words are painted once, a live report patches the numbers in place.
+// A tap on it does nothing (his word 11-03): it stays until Power on AND the smoker reports on. The other tabs still
+// work. It never shows during a session: that screen says "smoker off".
 function standbyWanted(v) {
-  if (STANDBY === false || !v || S.tab !== 'now' || S.cook || Date.now() < S.sbPeek) return false;
+  if (STANDBY === false || !v || S.tab !== 'now' || S.cook) return false;
   if (STANDBY === true) return true;
   return S.mode === 'live' && !!(v.last && v.last.power === false);
 }
@@ -120,7 +121,7 @@ function standbyLast() {
 }
 function standbyHTML(v) {
   const m = S.sbMedia || {};
-  return `<section class="standby" tabindex="0" aria-label="The smoker is off. Select to see the page."${m.poster ? ` style="background-image:url(${m.poster})"` : ''}>
+  return `<section class="standby" tabindex="0" aria-label="The smoker is off."${m.poster ? ` style="background-image:url(${m.poster})"` : ''}>
     <video class="sb-video" muted loop playsinline autoplay preload="auto"${m.poster ? ` poster="${m.poster}"` : ''}${m.video ? ` src="${m.video}"` : ''}></video>
     <div class="sb-shade"></div>
     <div class="sb-clock mono">${fmtClock(Date.now())}</div>
@@ -338,12 +339,7 @@ function renderActions(v) {
 // ---- after the HTML is in: the canvases, lazy loads, the ages ---------------------------------------------------
 function afterRender(v) {
   if (S.chart) { S.chart.destroy(); S.chart = null; }
-  const sbEl = $('#main .standby');
-  if (sbEl) {   // a tap or Select on the stand-by shows the page under it for a minute; Power on is its own button
-    sbEl.addEventListener('click', e => { if (!e.target.closest('[data-act="power"]')) peekStandby(); });
-    sbEl.addEventListener('keydown', e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === sbEl) { e.preventDefault(); peekStandby(); } });
-    const vid = $('video', sbEl); if (vid && vid.src) vid.play().catch(() => {});
-  }
+  const sbVid = $('#main .standby video'); if (sbVid && sbVid.src) sbVid.play().catch(() => {});
   const host = $('#chart');
   if (host && S.view) { S.chart = new PitChart(host, { zoom: false }); S.chart.setData(chartDataOf(S.view)); }
   if (S.view) for (const c of $$('canvas.spark')) { const r = S.view.roles.find(x => x.pid === c.dataset.pid); if (r) drawSpark(c, r.spark.length > 1 ? r.spark : r.pts.slice(-30), r.color); }
