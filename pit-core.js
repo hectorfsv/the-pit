@@ -10,7 +10,7 @@ const TV = /\bAFT[A-Z0-9]/.test(navigator.userAgent) || /[?&]tv=1\b/.test(locati
 // The stand-by screen: by the rule (the smoker off, no session) when unset; ?standby=1 forces it (a sample, a test), ?standby=0 never.
 const STANDBY = (m => m ? m[1] === '1' : null)(/[?&]standby=([01])\b/.exec(location.search));
 if (TV) document.documentElement.classList.add('tv');
-const APP_VERSION = '202611032300';
+const APP_VERSION = '202611050115';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // the six checks pass on the panel
 const PORT_COLOR = { p1: 0, p2: 1, p3: 2, p0: 3 };                    // a colour stays with its port: pulling one out never repaints another
 const colorOf = pid => MEAT_COLORS[pid in PORT_COLOR ? PORT_COLOR[pid] : 3];

@@ -22,6 +22,7 @@ const RULES = {
   askAtHours: 36, closeAtHours: 48,
   resends: 1,
   closeOffMinutes: 30, closeGoneMinutes: 60,   // a session that opened itself: off this long (a shutdown mid-cook must not split it), or not heard from
+  quietSeconds: 30,                            // the smoker said on, then nothing this long: it reports every ~7 s (11-05 shutdown catch)
   ambientWithin: 15,                           // a thermometer this close to the pit is reading air, not meat
 };
 
@@ -38,6 +39,7 @@ const ALERTS = {
   lid:         { on: false, name: 'Lid open',         when: "the lid sensor (lidOpn) open 5 minutes; his 1050 doesn't report one" },
   error:       { on: true,  name: 'Smoker error',     when: 'the smoker shows an error code' },
   off:         { on: true,  name: 'Turned off',       when: 'the smoker turned off during a cook' },
+  quiet:       { on: true,  name: 'Went quiet',       when: 'the smoker said on, then no word from it for 30 seconds (its Wi-Fi, a restart, the power)' },
   offline:     { on: true,  name: 'Offline',          when: 'no fresh word from the smoker for 5 minutes' },
   unreachable: { on: true,  name: "Can't reach it",   when: "3 failed reads in a row through Masterbuilt's cloud" },
   probe:       { on: true,  name: 'Probe trouble',    when: 'a probe the plan waits on reads wrong 3 looks in a row' },
@@ -61,6 +63,7 @@ const copy = o => JSON.parse(JSON.stringify(o));
 const inRange = v => typeof v === 'number' && v >= RULES.probeMin && v <= RULES.probeMax;
 const capName = s => s.charAt(0).toUpperCase() + s.slice(1);
 const clock = iso => new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' });
+const clockS = iso => new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit', second: '2-digit' });
 
 // ---- plans -----------------------------------------------------------------------------------------------
 
@@ -364,6 +367,13 @@ function check({ cook: c0, reading, history, now, alerts }) {
     note(out, 'note', cook.offSince ? `The smoker stayed off ${RULES.closeOffMinutes} minutes: session closed.` : `No word from the smoker for ${RULES.closeGoneMinutes} minutes: session closed.`);
     return finish();
   }
+  // Went quiet (11-05, the shutdown catch): a look's reading is a few seconds old (3 s median, 7 at most on 10-31), so
+  // the smoker's last word over 30 s old while it said on means its Wi-Fi, a restart or the power. The live listener
+  // rings the engine at 30 s of silence; a 2-minute look that lands in one sees it too. Said off = silence is normal.
+  const quietS = (ms(now) - ms(reading.at)) / 1000;
+  episode(ctx, 'quiet', !!reading.power && quietS >= RULES.quietSeconds,
+    `The smoker went quiet: nothing from it since ${clockS(reading.at)}, when it said on${typeof reading.pit === 'number' ? `, pit ${r0(reading.pit)}°F` : ''}. Is it still on?`,
+    'The smoker is talking again.');
   episode(ctx, 'offline', stale, `The smoker is offline: last heard at ${clock(reading.at)}. Nothing changes until it's back.`, 'The smoker is back online.');
   if (stale) return finish();
 
