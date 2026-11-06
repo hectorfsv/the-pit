@@ -226,7 +226,7 @@ function stepsHTML(v) {
   const p = v.pit, c = v.cook, cookPhase = v.phase === 'cook' || v.phase === 'paused';
   const li = p.steps.map((s, i) => {
     const st = i < p.idx || (!cookPhase) ? 'done' : i === p.idx ? 'cur' : '';
-    const u = s.until ? describeUntil(s.until, 'pit', i === p.idx ? c.tracks.pit : null, v.now) : null;
+    const u = s.until ? describeUntil(s.until, 'pit', i === p.idx ? c.tracks.pit : null, v.now, c) : null;
     const when = p.stepTimes[i] ? fmtClock(p.stepTimes[i]) : '';
     return `<li class="${st}"><span class="b"></span><span><span class="name">${esc(s.name || 'Step ' + (i + 1))}</span> <span class="until">${u ? esc(u.text) : i === p.steps.length - 1 ? 'then tap Cook done' : ''}</span></span><span class="set">${typeof s.set === 'number' ? s.set + '°' : ''}<br><span class="at">${when}</span></span></li>`;
   });

@@ -7,7 +7,7 @@
 'use strict';
 
 const RULES = {
-  meatConfirm: 2,                              // readings in a row past a meat line before a step moves
+  meatConfirm: 2,                              // reports in a row past a meat line before a step moves (the smoker's own, ~7 s apart, since 11-05)
   stall: { flatFor: 20, rise: 1, from: 150 },  // Hector 10-28: "20 min of the meat temperature not moving a single degree", watched from 150
   staleMinutes: 5,                             // a reading older than this = the smoker is offline
   readFailsAlert: 3,                           // failed reads in a row before telling him (6 minutes)
@@ -128,6 +128,27 @@ function series(readings, pid) {
   });
 }
 
+// A meat line's points: the looks' readings plus the smoker's own reports in between (the live listener's log, ~every
+// 7 s). Hector 11-05: "i never got the notification from the ribs hitting 198 and they mark 199 already": the live feed
+// had 198 twice at 4:16:56 PM, the 2-minute looks moved the step at 4:19:03. A look's reading IS one of those reports
+// (the same smoker timestamp, 186 of 186 that day), so a report is counted once. Only the lines use them: the stall,
+// the glitch counts and the alarms keep the looks' 2-minute readings.
+function lineSeries(ctx, pid) {
+  if (!ctx.live || !ctx.live.length) return series(ctx.all, pid);
+  const seen = new Set(ctx.all.map(r => ms(r.at)));
+  const pts = ctx.all.concat(ctx.live.filter(r => r && r.at && !seen.has(ms(r.at)))).sort((a, b) => ms(a.at) - ms(b.at));
+  return series(pts, pid);
+}
+// The look's own reading past the line (`past` says what past is) with the report before it, and every report after
+// it. The reading must be good among the looks and among the reports: a probe in the air for a few reports must not
+// make the real reading after it look like the glitch.
+function confirmed(ctx, pid, past) {
+  const own = series(ctx.all, pid), last = own[own.length - 1];
+  if (!ctx.reading || !last || last.at !== ctx.reading.at) return false;
+  const s = lineSeries(ctx, pid), i = s.findIndex(p => ms(p.at) === ms(ctx.reading.at));
+  return i >= RULES.meatConfirm - 1 && s.slice(i - RULES.meatConfirm + 1).every(p => past(p.v));
+}
+
 // The thermometers reading right now, in port order. They belong to the pit, not the plan: what's plugged in shows,
 // and a plan follows one (cook.probes: its meat -> the thermometer).
 const plugged = reading => Object.keys((reading && reading.probes) || {}).filter(id => inRange(reading.probes[id])).sort();
@@ -135,6 +156,17 @@ const roleOf = (cook, pid) => Object.keys(cook.probes || {}).find(r => cook.prob
 function nameOf(cook, pid) {
   const given = (cook.names || {})[pid], role = roleOf(cook, pid);
   return given || (role ? role.replace(/_/g, ' ') : /^p\d+$/.test(pid) ? 'probe ' + pid.slice(1) : pid);
+}
+// A meat by the name he gave its thermometer (11-05: "The probe_1 hit 165°F" where he had named p1 "ribs").
+const meatName = (cook, role) => cook.probes && cook.probes[role] ? nameOf(cook, cook.probes[role]) : role.replace(/_/g, ' ');
+// A plan's words with each made-up meat word (one with an underscore: "probe_1", "short_ribs", which the page writes
+// when it builds cooking points) said as he names it. A word he wrote himself ("meat", "ribs") stays his; {meat} stays a temperature.
+function sayNames(cook, text) {
+  for (const role of Object.keys(cook.probes || {})) {
+    if (role.indexOf('_') < 0) continue;
+    text = text.replace(new RegExp('(^|[^A-Za-z0-9_{])' + role + '(?![A-Za-z0-9_}])', 'g'), (m, pre) => pre + meatName(cook, role));
+  }
+  return text;
 }
 // Every thermometer in a tell: " (point 197, flat 177)". With one reading it's already in the words.
 function quoteAll(cook, reading) {
@@ -223,7 +255,7 @@ function enter(cook, role, idx, ctx) {
   cook.tracks[role] = { step: idx, since: ctx.now };
   const extra = { track: role, step: step.name || null };
   if (step.ask) extra.ask = step.ask;
-  if (step.tell) say(ctx.out, step.ask ? 'ask' : 'step', fill(step.tell, ctx) + quoteAll(cook, ctx.reading), extra);
+  if (step.tell) say(ctx.out, step.ask ? 'ask' : 'step', fill(sayNames(cook, step.tell), ctx) + quoteAll(cook, ctx.reading), extra);
   else note(ctx.out, 'step', `${role}: ${step.name || 'step ' + (idx + 1)}.`, extra);
   if (role === 'pit' && typeof step.set === 'number') requestSet(cook, step.set, ctx, 'plan');
 }
@@ -240,10 +272,7 @@ function met(u, role, st, ctx) {
   const probe = probeOf(u, role), pid = ctx.cook.probes[probe];
   if (!pid || ctx.temps[probe] == null) return false;
   const s = series(ctx.all, pid);
-  if ('at_least' in u || 'at_most' in u) {
-    const last = s.slice(-RULES.meatConfirm);
-    return last.length === RULES.meatConfirm && last.every(p => ('at_least' in u ? p.v >= u.at_least : p.v <= u.at_most));
-  }
+  if ('at_least' in u || 'at_most' in u) return confirmed(ctx, pid, v => ('at_least' in u ? v >= u.at_least : v <= u.at_most));
   const flatFor = u.flat_for || RULES.stall.flatFor, from = u.from || RULES.stall.from;
   if (ctx.temps[probe] < from || mins(st.since, ctx.now) < flatFor) return false;
   const cut = ms(ctx.now) - flatFor * 60000;
@@ -335,18 +364,36 @@ function startCook({ plan, probes, reading, now, id, meat, weightLb, alerts, tel
   const out = { orders: [], events: [] };
   const ctx = { cook, reading, now, out, on: switches(alerts), all: [reading], temps: tempsNow(cook, [reading], reading) };
   for (const role of Object.keys(plan.tracks)) if (role === 'pit' || probes[role]) enter(cook, role, 0, ctx);
+  cook.watch = watchLines(cook);
   return { ok: true, cook, orders: out.orders, events: out.events };
 }
 
+// The lines the cook waits on now, for the notebook (cooks.state.watch): the live listener rings the engine when two
+// reports in a row are past one, so the look that confirms it comes in seconds, not at the next 2-minute look (11-05).
+// The notebook only rings; the engine decides, with its own rules.
+function watchLines(cook) {
+  const w = [], add = (pid, at, down) => { if (pid && !w.some(x => x.pid === pid && x.at === at && x.down === down)) w.push({ pid, at, down, name: nameOf(cook, pid) }); };
+  if (cook.status === 'done' || cook.status === 'stopped') return w;
+  for (const [role, st] of Object.entries(cook.tracks || {})) {
+    const step = !st.ended && cook.plan.tracks[role] && cook.plan.tracks[role][st.step], u = step && step.until;
+    if (!u || !('at_least' in u || 'at_most' in u) || (role === 'pit' && cook.status !== 'running')) continue;
+    add((cook.probes || {})[probeOf(u, role)], 'at_least' in u ? u.at_least : u.at_most, !('at_least' in u));
+  }
+  for (const m of cook.marks || []) if (!m.told) add(m.pid, m.at, !!m.down);
+  if (cook.phase === 'rest') for (const r of cook.resting || []) if (!(cook.rested || {})[r]) add((cook.probes || {})[r], RULES.restTo, true);
+  return w;
+}
+
 // One look at a running cook. reading = the smoker now (null when the read failed); history = this cook's
-// readings from the last 45 minutes, oldest first, without this one; alerts = his switches (the pit's, read fresh
-// each look). Returns the new cook state, at most one setpoint order, and the events (tell: true = send to his chat).
-function check({ cook: c0, reading, history, now, alerts }) {
+// readings from the last 45 minutes, oldest first, without this one; live = the smoker's own reports of the last few
+// minutes (optional; only the meat lines count them); alerts = his switches (the pit's, read fresh each look).
+// Returns the new cook state, at most one setpoint order, and the events (tell: true = send to his chat).
+function check({ cook: c0, reading, history, live, now, alerts }) {
   const cook = copy(c0), out = { orders: [], events: [] };
-  const finish = () => { cook.heartbeatAt = now; return { cook, orders: out.orders, events: out.events }; };
+  const finish = () => { cook.heartbeatAt = now; cook.watch = watchLines(cook); return { cook, orders: out.orders, events: out.events }; };
   if (cook.status === 'done' || cook.status === 'stopped') return { cook, orders: [], events: [] };
   cook.alarms = cook.alarms || {}; cook.glitches = cook.glitches || {};
-  const ctx = { cook, reading, now, out, on: switches(alerts), all: [], temps: {} };
+  const ctx = { cook, reading, now, out, on: switches(alerts), all: [], temps: {}, live: Array.isArray(live) ? live : [] };
   // 0. Timers need no smoker: told once when they're up.
   for (const t of (cook.timers || [])) if (!t.told && ms(now) >= t.at) { t.told = true; say(out, 'step', `Timer "${t.name}": ${t.minutes} minutes are up.`, { timer: t.name }); }
 
@@ -422,11 +469,9 @@ function check({ cook: c0, reading, history, now, alerts }) {
 
   // 6b. His own "tell me at" on a thermometer: once, two readings in a row past the line, like a meat line.
   for (const m of cook.marks || []) {
-    if (m.told) continue;
-    const s = series(all, m.pid).slice(-RULES.meatConfirm), last = s[s.length - 1];
-    if (s.length < RULES.meatConfirm || last.at !== reading.at || !s.every(p => (m.down ? p.v <= m.at : p.v >= m.at))) continue;
+    if (m.told || !confirmed(ctx, m.pid, v => (m.down ? v <= m.at : v >= m.at))) continue;
     m.told = true;
-    say(out, 'step', `The ${nameOf(cook, m.pid)} ${m.down ? 'came down to' : 'reached'} ${m.at}°F (${r0(last.v)}°F now).` + quoteAll(cook, reading), { thermometer: m.pid });
+    say(out, 'step', `The ${nameOf(cook, m.pid)} ${m.down ? 'came down to' : 'reached'} ${m.at}°F (${r0(reading.probes[m.pid])}°F now).` + quoteAll(cook, reading), { thermometer: m.pid });
   }
 
   // 7. After Cook done: each meat rests off the smoker down to 160, then the hold. A meat whose probe wasn't
@@ -434,10 +479,9 @@ function check({ cook: c0, reading, history, now, alerts }) {
   if (cook.phase === 'rest') {
     for (const role of cook.resting) {
       if (cook.rested[role]) continue;
-      const s = series(all, cook.probes[role]).slice(-RULES.meatConfirm);
-      if (ctx.temps[role] == null || s.length < RULES.meatConfirm || !s.every(p => p.v <= RULES.restTo)) continue;
+      if (ctx.temps[role] == null || !confirmed(ctx, cook.probes[role], v => v <= RULES.restTo)) continue;
       cook.rested[role] = true;
-      const said = `The ${role} rested to ${r0(ctx.temps[role])}°F. `;
+      const said = `The ${meatName(cook, role)} rested to ${r0(ctx.temps[role])}°F. `;
       if (cook.resting.every(r => cook.rested[r])) toHold(ctx, said);
       else say(out, 'step', said.trim(), { phase: 'rest', track: role });
     }
@@ -459,11 +503,11 @@ function check({ cook: c0, reading, history, now, alerts }) {
       const was = nameOf(cook, cook.probes[role]), now_ = nameOf(cook, next);
       cook.probes[role] = next; cook.glitches[role] = 0; delete cook.alarms['probe:' + role];
       ctx.temps = tempsNow(cook, all, reading);
-      alert(ctx, 'probe', `The ${was} thermometer stopped reading. The ${now_} (${r0(reading.probes[next])}°F) follows the ${role} now.`);
+      alert(ctx, 'probe', `The ${was} thermometer stopped reading. The ${now_} (${r0(reading.probes[next])}°F) follows the ${role.replace(/_/g, ' ')} now.`);
       continue;
     }
     episode(ctx, 'probe:' + role, needed.has(role) && cook.glitches[role] >= RULES.glitchAlertAfter,
-      `The ${role} probe reads wrong (unplugged or moved?). I'm waiting on it.`, `The ${role} probe reads right again.`);
+      `The ${meatName(cook, role)} probe reads wrong (unplugged or moved?). I'm waiting on it.`, `The ${meatName(cook, role)} probe reads right again.`);
   }
 
   // 9. Alarms. A door sensor switched off counts nowhere, so a stuck one can't hide a dying fire.
@@ -482,7 +526,7 @@ function check({ cook: c0, reading, history, now, alerts }) {
   const errs = (reading.errors || []).filter(e => e);
   episode(ctx, 'error', errs.length > 0, `The smoker shows error ${errs.join(', ')}.`, 'The error cleared.');
   const low = cook.phase !== 'hold' ? [] : Object.keys(cook.probes || {})
-    .filter(r => ctx.temps[r] != null && ctx.temps[r] < RULES.holdFloor).map(r => `the ${r} ${r0(ctx.temps[r])}°F`);
+    .filter(r => ctx.temps[r] != null && ctx.temps[r] < RULES.holdFloor).map(r => `the ${meatName(cook, r)} ${r0(ctx.temps[r])}°F`);
   episode(ctx, 'hold', low.length > 0, `Holding too low: ${low.join(', ')} (under ${RULES.holdFloor}°F).`, `Back above ${RULES.holdFloor}°F.`);
 
   // 10. No cook runs forever.
@@ -569,7 +613,7 @@ function act({ cook: c0, action, value, reading, now, alerts }) {
       // raised a cold pit to 150 with the fan at 100%) is left as it is.
       const lower = typeof reading.set === 'number' && reading.set > cook.restSet;
       say(out, 'step', `Cook done. ${lower ? `Pit to ${cook.restSet}°F for the hold. ` : 'The pit is left as it is. '}` + (cook.resting.length
-        ? `Resting: the ${cook.resting.join(' and the ')}; I'll tell you at ${RULES.restTo}°F.`
+        ? `Resting: the ${cook.resting.map(r => meatName(cook, r)).join(' and the ')}; I'll tell you at ${RULES.restTo}°F.`
         : `Tap Rested when the meat is down to ${RULES.restTo}–155°F.`), { phase: 'rest' });
       if (lower) requestSet(cook, cook.restSet, ctx, 'plan');      // refused (°C) = an alert; the rest goes on
       break;
@@ -667,6 +711,7 @@ function act({ cook: c0, action, value, reading, now, alerts }) {
     default:
       return fail(`Unknown action "${action}".`);
   }
+  cook.watch = watchLines(cook);
   return { ok: true, cook, orders: out.orders, events: out.events };
 }
 

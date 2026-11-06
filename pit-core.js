@@ -10,7 +10,7 @@ const TV = /\bAFT[A-Z0-9]/.test(navigator.userAgent) || /[?&]tv=1\b/.test(locati
 // The stand-by screen: by the rule (the smoker off, no session) when unset; ?standby=1 forces it (a sample, a test), ?standby=0 never.
 const STANDBY = (m => m ? m[1] === '1' : null)(/[?&]standby=([01])\b/.exec(location.search));
 if (TV) document.documentElement.classList.add('tv');
-const APP_VERSION = '202611050115';
+const APP_VERSION = '202611051715';
 const MEAT_COLORS = ['#3987E5', '#D55181', '#9085E9', '#199E70'];   // the six checks pass on the panel
 const PORT_COLOR = { p1: 0, p2: 1, p3: 2, p0: 3 };                    // a colour stays with its port: pulling one out never repaints another
 const colorOf = pid => MEAT_COLORS[pid in PORT_COLOR ? PORT_COLOR[pid] : 3];
@@ -185,15 +185,18 @@ function demoJumps(d) {
 }
 
 // ---- what a screen needs about a cook ---------------------------------------------------------------------
-function describeUntil(u, role, track, now) {
+// A meat by the name he gave its thermometer (11-05: the Now screen said "until the probe_1 hits 198" for his ribs).
+const meatLabel = (cook, role) => (cook && cook.probes && cook.probes[role] && (cook.names || {})[cook.probes[role]]) || String(role).replace(/_/g, ' ');
+function describeUntil(u, role, track, now, cook) {
   if ('minutes' in u) {
     const left = track && track.since ? Math.max(0, u.minutes - (now - track.since) / MINUTE) : null;
     return { kind: 'minutes', value: u.minutes, left, text: left == null ? `for ${fmtDur(u.minutes)}` : left > 0 ? `${fmtDur(left)} left` : 'time is up', html: left == null ? `for <b>${fmtDur(u.minutes)}</b>` : left > 0 ? `<b>${fmtDur(left)}</b> left` : 'time is up' };
   }
   const probe = 'stall' in u ? (u.stall === true ? role : u.stall) : u.probe || (role === 'pit' ? null : role);
-  if ('stall' in u) return { kind: 'stall', probe, text: role === 'pit' ? `until the ${probe} stalls` : 'until the stall', html: role === 'pit' ? `until the ${esc(probe)} stalls` : 'until the stall' };
-  if ('at_least' in u) return { kind: 'at_least', value: u.at_least, probe, text: role === 'pit' ? `until the ${probe} hits ${u.at_least}` : `until ${u.at_least}`, html: role === 'pit' ? `until the ${esc(probe)} hits <b>${u.at_least}</b>` : `until <b>${u.at_least}</b>` };
-  return { kind: 'at_most', value: u.at_most, probe, text: role === 'pit' ? `until the ${probe} is down to ${u.at_most}` : `down to ${u.at_most}`, html: role === 'pit' ? `until the ${esc(probe)} is down to <b>${u.at_most}</b>` : `down to <b>${u.at_most}</b>` };
+  const who = probe ? meatLabel(cook, probe) : probe;
+  if ('stall' in u) return { kind: 'stall', probe, text: role === 'pit' ? `until the ${who} stalls` : 'until the stall', html: role === 'pit' ? `until the ${esc(who)} stalls` : 'until the stall' };
+  if ('at_least' in u) return { kind: 'at_least', value: u.at_least, probe, text: role === 'pit' ? `until the ${who} hits ${u.at_least}` : `until ${u.at_least}`, html: role === 'pit' ? `until the ${esc(who)} hits <b>${u.at_least}</b>` : `until <b>${u.at_least}</b>` };
+  return { kind: 'at_most', value: u.at_most, probe, text: role === 'pit' ? `until the ${who} is down to ${u.at_most}` : `down to ${u.at_most}`, html: role === 'pit' ? `until the ${esc(who)} is down to <b>${u.at_most}</b>` : `down to <b>${u.at_most}</b>` };
 }
 // °F per hour over the last 30 minutes (null until there are 20 minutes of readings)
 function rateOf(pts, now) {
@@ -260,12 +263,12 @@ function buildView(cook, readings, events, now, newest) {
     const stale = !!lastPt && now - lastPt[0] > 10 * MINUTE;
     const rate = stale || cook.idle ? null : rateOf(pts, now), track = role ? cook.tracks[role] || null : null, steps = role ? plan.tracks[role] || [] : [];
     const step = track ? steps[track.step] || null : null;
-    let until = step && step.until ? describeUntil(step.until, role, track, now) : null;
+    let until = step && step.until ? describeUntil(step.until, role, track, now, cook) : null;
     // A meat with no track of its own shows the line the pit's step waits on ("until 197", "until the stall").
     const pitTrack = cook.tracks.pit, pitStepNow = pitTrack ? (plan.tracks.pit || [])[pitTrack.step] : null;
     if (role && !until && !track && pitStepNow && pitStepNow.until && !('minutes' in pitStepNow.until) && cook.phase === 'cook') {
       const u = pitStepNow.until, waitsOn = 'stall' in u ? u.stall : u.probe;
-      if (waitsOn === role) until = describeUntil(u, role, pitTrack, now);
+      if (waitsOn === role) until = describeUntil(u, role, pitTrack, now, cook);
     }
     const ended = !!(track && track.ended) || (!track && cook.phase !== 'cook' && !cook.idle), resting = cook.phase === 'rest' && (cook.resting || []).includes(role) && !(cook.rested || {})[role];
     const stalled = cook.phase === 'cook' && temp != null && temp >= 150 && flatFor20(pts, now) && !ended;
@@ -280,7 +283,7 @@ function buildView(cook, readings, events, now, newest) {
   });
   const pitSteps = plan.tracks.pit || [], pt = cook.tracks.pit || { step: 0 }, pitStep = pitSteps[pt.step] || null;
   const pit = { temp: last ? last.pit : null, set: last ? last.set : null, heating: !!(last && last.heating), step: pitStep, idx: pt.step, next: pitSteps[pt.step + 1] || null,
-    steps: pitSteps, until: pitStep && pitStep.until ? describeUntil(pitStep.until, 'pit', pt, now) : null, ended: !!pt.ended,
+    steps: pitSteps, until: pitStep && pitStep.until ? describeUntil(pitStep.until, 'pit', pt, now, cook) : null, ended: !!pt.ended,
     stepTimes: events.filter(e => e.track === 'pit' && !e.phase && (e.kind === 'step' || e.kind === 'ask')).map(e => e.at) };
   const sw = ENGINE ? ENGINE.switches(S.pit && S.pit.alerts) : { door: true, lid: false };
   const sensors = { online, lastHeard: last ? last.at : null, door: !sw.door ? 'off' : last && last.door ? 'open' : 'closed', lid: !sw.lid ? 'off' : last && last.lid ? 'open' : 'closed',
